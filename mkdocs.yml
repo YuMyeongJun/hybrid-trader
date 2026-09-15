@@ -1,0 +1,121 @@
+site_name: Hybrid Trader
+site_description: Unified Python Library for Korean Stock & Crypto Automated Trading
+site_author: Hybrid Trader Contributors
+site_url: https://YuMyeongJun.github.io/hybrid-trader
+repo_url: https://github.com/YuMyeongJun/hybrid-trader
+repo_name: YuMyeongJun/hybrid-trader
+copyright: Copyright &copy; 2024 Hybrid Trader
+
+theme:
+  name: material
+  locale: ko
+  custom_dir: docs/overrides
+
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: orange
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: orange
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - toc.follow
+
+plugins:
+  - search:
+      lang: ko
+  - glightbox
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - pymdownx.arithmatex
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.critic
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: pymdownx.emoji.twemoji
+      emoji_generator: pymdownx.emoji.to_svg
+  - pymdownx.highlight:
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.progressbar
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+  - meta
+  - tables
+  - footnotes
+  - attr_list
+  - md_in_html
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+  - User Guide:
+    - Architecture: guide/architecture.md
+    - Configuration: guide/configuration.md
+    - Examples: guide/examples.md
+    - Troubleshooting: guide/troubleshooting.md
+  - API Reference:
+    - Overview: api/overview.md
+    - Core Engine: api/engine.md
+    - Configuration: api/config.md
+    - Monitoring: api/monitoring.md
+    - Exceptions: api/exceptions.md
+  - Resources:
+    - FAQ: resources/faq.md
+    - Contributing: resources/contributing.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/YuMyeongJun/hybrid-trader
+      name: GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/hybrid-trader/
+      name: PyPI
+
+  version:
+    provider: mike
+    default: latest
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js

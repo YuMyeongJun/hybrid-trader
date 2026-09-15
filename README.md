@@ -2,6 +2,12 @@
 
 **하이브리드 자동매매 시스템을 위한 통합 파이썬 라이브러리**
 
+[![Tests](https://github.com/mjyu-louis/hybrid-trader/actions/workflows/tests.yml/badge.svg)](https://github.com/mjyu-louis/hybrid-trader/actions/workflows/tests.yml)
+[![Advanced Tests](https://github.com/mjyu-louis/hybrid-trader/actions/workflows/tests-advanced.yml/badge.svg)](https://github.com/mjyu-louis/hybrid-trader/actions/workflows/tests-advanced.yml)
+[![codecov](https://codecov.io/gh/mjyu-louis/hybrid-trader/branch/main/graph/badge.svg)](https://codecov.io/gh/mjyu-louis/hybrid-trader)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 한국투자증권(KIS) API와 업비트(Upbit) API를 하나로 통합하여, 주식과 암호화폐를 동시에 거래할 수 있는 자동매매 시스템을 **단 몇 줄의 코드**로 구축할 수 있습니다.
 
 ---
@@ -94,7 +100,17 @@ with HybridTradingEngine(config) as engine:
 
 ---
 
-## 📚 API 문서
+## 📚 문서 및 API
+
+**전체 문서는 [Hybrid Trader 공식 문서](https://YuMyeongJun.github.io/hybrid-trader)를 참고하세요.**
+
+### 빠른 링크
+
+- [설치 가이드](https://YuMyeongJun.github.io/hybrid-trader/getting-started/installation/)
+- [빠른 시작](https://YuMyeongJun.github.io/hybrid-trader/getting-started/quickstart/)
+- [API 레퍼런스](https://YuMyeongJun.github.io/hybrid-trader/api/overview/)
+- [실전 예제](https://YuMyeongJun.github.io/hybrid-trader/guide/examples/)
+- [FAQ](https://YuMyeongJun.github.io/hybrid-trader/resources/faq/)
 
 ### HybridTradingEngine
 
@@ -229,6 +245,55 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('hybrid_trader.engine')
 logger.setLevel(logging.DEBUG)
 ```
+
+---
+
+## 🧪 테스트
+
+이 프로젝트는 포괄적인 테스트 스위트를 제공합니다:
+
+### 로컬 테스트 실행
+
+```bash
+# 전체 테스트 실행
+pytest tests/ -v
+
+# 커버리지 리포트와 함께 실행
+pytest tests/ -v --cov=hybrid_trader --cov-report=html
+
+# 특정 테스트 카테고리만 실행
+pytest tests/ -v -m "unit"              # 단위 테스트
+pytest tests/ -v -m "integration"       # 통합 테스트
+pytest tests/ -v -m "performance"       # 성능 테스트
+pytest tests/ -v -m "security"          # 보안 테스트
+pytest tests/ -v -m "edge_case"         # 엣지 케이스 테스트
+```
+
+### 테스트 스위트 구성
+
+- **test_engine.py**: 메인 트레이딩 엔진 테스트
+- **test_config.py**: 설정 검증 테스트
+- **test_analysis.py**: 기술적 분석 테스트
+- **test_monitoring.py**: 모니터링 기능 테스트
+- **test_performance.py**: 성능 및 속도 테스트
+- **test_edge_cases.py**: 엣지 케이스 및 경계 조건 테스트
+- **test_security.py**: 보안 및 자격증명 처리 테스트
+- **test_api_integration.py**: KIS 및 Upbit API 통합 테스트
+- **test_data_validation.py**: 데이터 유효성 검증 테스트
+
+### 커버리지 목표
+
+- **목표 커버리지**: 90% 이상
+- **현재 상태**: [![codecov](https://codecov.io/gh/mjyu-louis/hybrid-trader/branch/main/graph/badge.svg)](https://codecov.io/gh/mjyu-louis/hybrid-trader)
+
+### CI/CD 파이프라인
+
+- **tests.yml**: 기본 테스트 및 코드 품질 검사
+- **tests-advanced.yml**: 고급 테스트 (성능, 보안, 엣지 케이스)
+  - Python 3.8 ~ 3.12 (여러 OS 지원)
+  - 성능 벤치마크
+  - 보안 스캔 (Bandit, Safety)
+  - 종합 커버리지 분석
 
 ---
 
