@@ -20,6 +20,7 @@ from .monitoring import (
     PriceSnapshot,
     PortfolioSnapshot,
 )
+from .costs import CostModel
 
 __version__ = "0.1.0"
 __author__ = "Your Name"
@@ -36,4 +37,5 @@ __all__ = [
     "PriceAlert",
     "PriceSnapshot",
     "PortfolioSnapshot",
+    "CostModel",
 ]

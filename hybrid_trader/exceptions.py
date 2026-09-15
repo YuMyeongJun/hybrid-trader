@@ -54,6 +54,16 @@ class HybridTraderException(Exception):
         return f"{self.__class__.__name__}(message={self.message!r}, error_code={self.error_code!r})"
 
 
+class UnsupportedOperationError(HybridTraderException):
+    """The adapter has no verified implementation; no request was sent."""
+
+    def __init__(self, api_name: str, endpoint: str) -> None:
+        super().__init__(
+            f"{api_name} operation {endpoint} is not implemented; no request was sent",
+            error_code="UNSUPPORTED_OPERATION",
+        )
+
+
 class InvalidTickerError(HybridTraderException):
     """Exception raised when an invalid ticker is provided.
 

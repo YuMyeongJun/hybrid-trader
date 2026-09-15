@@ -7,10 +7,12 @@ Securities (KIS) and Upbit APIs into a single, easy-to-use interface.
 from typing import Optional, Dict, Any, List
 import logging
 import time
+import math
 
 from .config import TradingConfig
 from .exceptions import (
     HybridTraderException,
+    UnsupportedOperationError,
     InvalidTickerError,
     APIConnectionError,
     ConfigurationError,
@@ -444,160 +446,49 @@ class HybridTradingEngine:
                 message=f"Failed to fetch US stock price for {ticker}"
             ) from e
 
-    def _call_kis_api(
-        self,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        method: str = "GET"
-    ) -> Any:
-        """Internal method to call KIS API with retry logic.
-
-        한국투자증권 API를 호출하는 내부 메서드입니다.
-
-        Args:
-            endpoint (str): API endpoint path
-            params (Optional[Dict]): Query parameters or request body
-            method (str): HTTP method. Defaults to "GET".
-
-        Returns:
-            Any: API response data
-
-        Raises:
-            APIConnectionError: If API call fails after all retries
-        """
+    def _call_kis_api(self, endpoint: str, params=None, method: str = 'GET') -> Any:
         params = params or {}
+        if method != 'GET' or endpoint != '/stock/price' or 'ticker' not in params:
+            raise UnsupportedOperationError('KIS', endpoint)
+        try:
+            result = self.kis_session.fetch_price(params['ticker'])
+            return self._validated_price(result['stck_prpr'])
+        except Exception as exc:
+            raise APIConnectionError(api_name='KIS', original_error=exc) from exc
 
-        for attempt in range(self.config.retry_count):
-            try:
-                logger.debug(f"KIS API call attempt {attempt + 1}: {endpoint}")
-
-                if endpoint == "/stock/price" and "ticker" in params:
-                    ticker = params["ticker"]
-                    try:
-                        price_data = self.kis_session.fetch_price(ticker)
-                        if price_data and 'stck_prpr' in price_data:
-                            return float(price_data['stck_prpr'])
-                    except (AttributeError, KeyError, TypeError):
-                        logger.debug(f"Could not fetch KIS price for {ticker}, returning mock data")
-                        return 75500.0
-
-                return None
-
-            except Exception as e:
-                if attempt == self.config.retry_count - 1:
-                    logger.error(f"KIS API call failed after {self.config.retry_count} attempts: {e}")
-                    raise APIConnectionError(
-                        api_name="KIS",
-                        original_error=e,
-                        message=f"KIS API call to {endpoint} failed after {self.config.retry_count} attempts"
-                    ) from e
-                logger.warning(f"KIS API call failed (attempt {attempt + 1}/{self.config.retry_count}), retrying...")
-                time.sleep(1)
-
-    def _call_upbit_api(
-        self,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        method: str = "GET"
-    ) -> Any:
-        """Internal method to call Upbit API with retry logic.
-
-        업비트 API를 호출하는 내부 메서드입니다.
-
-        Args:
-            endpoint (str): API endpoint path
-            params (Optional[Dict]): Query parameters or request body
-            method (str): HTTP method. Defaults to "GET".
-
-        Returns:
-            Any: API response data
-
-        Raises:
-            APIConnectionError: If API call fails after all retries
-        """
+    def _call_upbit_api(self, endpoint: str, params=None, method: str = 'GET') -> Any:
         params = params or {}
+        if method != 'GET' or endpoint != '/ticker' or 'markets' not in params:
+            raise UnsupportedOperationError('Upbit', endpoint)
+        try:
+            import pyupbit
+            return self._validated_price(pyupbit.get_current_price(params['markets']))
+        except Exception as exc:
+            raise APIConnectionError(api_name='Upbit', original_error=exc) from exc
 
-        for attempt in range(self.config.retry_count):
-            try:
-                logger.debug(f"Upbit API call attempt {attempt + 1}: {endpoint}")
-
-                if endpoint == "/ticker" and "markets" in params:
-                    market = params["markets"]
-                    try:
-                        price = self.upbit_session.get_current_price(market)
-                        if price is not None:
-                            return float(price)
-                    except (AttributeError, TypeError):
-                        logger.debug(f"Could not fetch Upbit price for {market}, returning mock data")
-                        return 65500000.0
-
-                return None
-
-            except Exception as e:
-                if attempt == self.config.retry_count - 1:
-                    logger.error(f"Upbit API call failed after {self.config.retry_count} attempts: {e}")
-                    raise APIConnectionError(
-                        api_name="Upbit",
-                        original_error=e,
-                        message=f"Upbit API call to {endpoint} failed after {self.config.retry_count} attempts"
-                    ) from e
-                logger.warning(f"Upbit API call failed (attempt {attempt + 1}/{self.config.retry_count}), retrying...")
-                time.sleep(1)
-
-    def _call_alpaca_api(
-        self,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        method: str = "GET"
-    ) -> Any:
-        """Internal method to call Alpaca API with retry logic.
-
-        알파카 API를 호출하는 내부 메서드입니다.
-
-        Args:
-            endpoint (str): API endpoint path
-            params (Optional[Dict]): Query parameters or request body
-            method (str): HTTP method. Defaults to "GET".
-
-        Returns:
-            Any: API response data
-
-        Raises:
-            APIConnectionError: If API call fails after all retries
-        """
+    def _call_alpaca_api(self, endpoint: str, params=None, method: str = 'GET') -> Any:
         params = params or {}
+        if method != 'GET' or endpoint != '/quotes/latest' or 'symbols' not in params:
+            raise UnsupportedOperationError('Alpaca', endpoint)
+        try:
+            symbol = params['symbols']
+            quotes = self.alpaca_session.get_latest_quotes(symbol, feed='sip')
+            quote = quotes[symbol]
+            price = getattr(quote, 'ap', None)
+            if price is None:
+                price = quote.ask_price
+            return self._validated_price(price)
+        except Exception as exc:
+            raise APIConnectionError(api_name='Alpaca', original_error=exc) from exc
 
-        for attempt in range(self.config.retry_count):
-            try:
-                logger.debug(f"Alpaca API call attempt {attempt + 1}: {endpoint}")
-
-                if endpoint == "/quotes/latest" and "symbols" in params:
-                    symbol = params["symbols"]
-                    try:
-                        # 알파카 API에서 주식 가격 조회
-                        quotes = self.alpaca_session.get_latest_quotes(symbol, feed="sip")
-                        if quotes and symbol in quotes:
-                            quote = quotes[symbol]
-                            if hasattr(quote, 'ap') and quote.ap is not None:
-                                return float(quote.ap)
-                            elif hasattr(quote, 'ask_price') and quote.ask_price is not None:
-                                return float(quote.ask_price)
-                    except (AttributeError, KeyError, TypeError):
-                        logger.debug(f"Could not fetch Alpaca price for {symbol}, returning mock data")
-                        return 150.25
-
-                return None
-
-            except Exception as e:
-                if attempt == self.config.retry_count - 1:
-                    logger.error(f"Alpaca API call failed after {self.config.retry_count} attempts: {e}")
-                    raise APIConnectionError(
-                        api_name="Alpaca",
-                        original_error=e,
-                        message=f"Alpaca API call to {endpoint} failed after {self.config.retry_count} attempts"
-                    ) from e
-                logger.warning(f"Alpaca API call failed (attempt {attempt + 1}/{self.config.retry_count}), retrying...")
-                time.sleep(1)
+    @staticmethod
+    def _validated_price(value: Any) -> float:
+        if isinstance(value, bool) or value is None:
+            raise ValueError('Market price must be a finite positive number')
+        price = float(value)
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError('Market price must be a finite positive number')
+        return price
 
     def buy_stock(self, ticker: str, qty: int, price: float) -> Dict[str, Any]:
         """Buy stocks through Korea Investment & Securities.
@@ -623,9 +514,9 @@ class HybridTradingEngine:
         """
         if not ticker or not isinstance(ticker, str):
             raise ValueError("Ticker must be a non-empty string")
-        if not isinstance(qty, int) or qty <= 0:
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
             raise ValueError("Quantity must be a positive integer")
-        if not isinstance(price, (int, float)) or price <= 0:
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             raise ValueError("Price must be a positive number")
 
         try:
@@ -673,9 +564,9 @@ class HybridTradingEngine:
         """
         if not ticker or not isinstance(ticker, str):
             raise ValueError("Ticker must be a non-empty string")
-        if not isinstance(qty, int) or qty <= 0:
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
             raise ValueError("Quantity must be a positive integer")
-        if not isinstance(price, (int, float)) or price <= 0:
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             raise ValueError("Price must be a positive number")
 
         try:
@@ -722,7 +613,7 @@ class HybridTradingEngine:
         """
         if not market or not isinstance(market, str):
             raise ValueError("Market must be a non-empty string")
-        if not isinstance(krw, (int, float)) or krw <= 0:
+        if isinstance(krw, bool) or not isinstance(krw, (int, float)) or not math.isfinite(krw) or krw <= 0:
             raise ValueError("KRW amount must be a positive number")
 
         try:
@@ -769,7 +660,7 @@ class HybridTradingEngine:
         """
         if not market or not isinstance(market, str):
             raise ValueError("Market must be a non-empty string")
-        if not isinstance(qty, (int, float)) or qty <= 0:
+        if isinstance(qty, bool) or not isinstance(qty, (int, float)) or not math.isfinite(qty) or qty <= 0:
             raise ValueError("Quantity must be a positive number")
 
         try:
@@ -817,9 +708,9 @@ class HybridTradingEngine:
         """
         if not ticker or not isinstance(ticker, str):
             raise ValueError("Ticker must be a non-empty string")
-        if not isinstance(qty, int) or qty <= 0:
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
             raise ValueError("Quantity must be a positive integer")
-        if not isinstance(price, (int, float)) or price <= 0:
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             raise ValueError("Price must be a positive number")
 
         try:
@@ -869,9 +760,9 @@ class HybridTradingEngine:
         """
         if not ticker or not isinstance(ticker, str):
             raise ValueError("Ticker must be a non-empty string")
-        if not isinstance(qty, int) or qty <= 0:
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
             raise ValueError("Quantity must be a positive integer")
-        if not isinstance(price, (int, float)) or price <= 0:
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             raise ValueError("Price must be a positive number")
 
         try:
@@ -1191,9 +1082,9 @@ class HybridTradingEngine:
         """
         if not ticker or not isinstance(ticker, str):
             raise ValueError("Ticker must be a non-empty string")
-        if not isinstance(qty, int) or qty <= 0:
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
             raise ValueError("Quantity must be a positive integer")
-        if not isinstance(price, (int, float)) or price <= 0:
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             raise ValueError("Price must be a positive number")
 
         try:
@@ -1243,9 +1134,9 @@ class HybridTradingEngine:
         """
         if not ticker or not isinstance(ticker, str):
             raise ValueError("Ticker must be a non-empty string")
-        if not isinstance(qty, int) or qty <= 0:
+        if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
             raise ValueError("Quantity must be a positive integer")
-        if not isinstance(price, (int, float)) or price <= 0:
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
             raise ValueError("Price must be a positive number")
 
         try:
@@ -1270,109 +1161,11 @@ class HybridTradingEngine:
             logger.error(f"Failed to sell EU stock {ticker}: {e}")
             raise
 
-    def _call_ib_api(
-        self,
-        endpoint: str,
-        params: Optional[Dict[str, Any]] = None,
-        method: str = "GET"
-    ) -> Any:
-        """Internal method to call Interactive Brokers API with retry logic.
-
-        Interactive Brokers API를 호출하는 내부 메서드입니다.
-
-        Args:
-            endpoint (str): API endpoint path
-            params (Optional[Dict]): Query parameters or request body
-            method (str): HTTP method. Defaults to "GET".
-
-        Returns:
-            Any: API response data
-
-        Raises:
-            SessionNotInitializedError: If IB session not configured.
-            APIConnectionError: If API call fails after all retries
-        """
-        params = params or {}
-
-        # IB 세션이 설정되지 않았는지 확인
+    def _call_ib_api(self, endpoint: str, params=None, method: str = 'GET') -> Any:
         if self.config.ib_config is None:
             raise SessionNotInitializedError(
-                session_name="InteractiveBrokers",
-                required_config="ib_config",
-                message="Interactive Brokers configuration is not set."
-            )
-
-        for attempt in range(self.config.retry_count):
-            try:
-                logger.debug(f"IB API call attempt {attempt + 1}: {endpoint}")
-
-                if endpoint == "/ticker/price" and "ticker" in params:
-                    ticker = params["ticker"]
-                    try:
-                        # Mock 구현: ib-insync 라이브러리 사용
-                        # 실제 구현에서는 Contract와 market data subscription 사용
-                        if self.config.ib_config.is_demo:
-                            # 데모 모드: 모의 가격 반환
-                            logger.debug(f"Demo mode: returning mock price for {ticker}")
-                            return 92.50  # BMW 예시 가격
-                        else:
-                            # 실제 IB API 호출 (stub)
-                            logger.debug(f"Attempting to fetch real IB price for {ticker}")
-                            return 92.50  # Stub implementation
-                    except Exception as e:
-                        logger.debug(f"Could not fetch IB price for {ticker}: {e}, returning mock data")
-                        return 92.50
-
-                elif endpoint == "/orders/buy" and "ticker" in params:
-                    ticker = params["ticker"]
-                    qty = params.get("qty", 0)
-                    price = params.get("price", 0)
-
-                    # Mock 구현: 매수 주문 생성
-                    order_result = {
-                        "order_id": f"IB-BUY-{ticker}-{int(time.time())}",
-                        "ticker": ticker,
-                        "qty": qty,
-                        "price": price,
-                        "currency": "EUR",
-                        "market": "EUREX",
-                        "status": "PENDING",
-                        "timestamp": time.time()
-                    }
-                    logger.debug(f"IB buy order created: {order_result}")
-                    return order_result
-
-                elif endpoint == "/orders/sell" and "ticker" in params:
-                    ticker = params["ticker"]
-                    qty = params.get("qty", 0)
-                    price = params.get("price", 0)
-
-                    # Mock 구현: 매도 주문 생성
-                    order_result = {
-                        "order_id": f"IB-SELL-{ticker}-{int(time.time())}",
-                        "ticker": ticker,
-                        "qty": qty,
-                        "price": price,
-                        "currency": "EUR",
-                        "market": "EUREX",
-                        "status": "PENDING",
-                        "timestamp": time.time()
-                    }
-                    logger.debug(f"IB sell order created: {order_result}")
-                    return order_result
-
-                return None
-
-            except Exception as e:
-                if attempt == self.config.retry_count - 1:
-                    logger.error(f"IB API call failed after {self.config.retry_count} attempts: {e}")
-                    raise APIConnectionError(
-                        api_name="InteractiveBrokers",
-                        original_error=e,
-                        message=f"IB API call to {endpoint} failed after {self.config.retry_count} attempts"
-                    ) from e
-                logger.warning(f"IB API call failed (attempt {attempt + 1}/{self.config.retry_count}), retrying...")
-                time.sleep(1)
+                session_name='InteractiveBrokers', required_config='ib_config')
+        raise UnsupportedOperationError('InteractiveBrokers', endpoint)
 
     def close(self) -> None:
         """Close all active sessions.

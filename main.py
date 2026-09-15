@@ -19,6 +19,8 @@ import os
 import sys
 import logging
 import time
+from datetime import datetime, time as dt_time
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
@@ -130,6 +132,17 @@ class TradingBot:
             logger.warning("⚠️  글로벌 거래가 비활성화되어 있습니다")
             return
 
+    @staticmethod
+    def _market_open(region: MarketRegion) -> bool:
+        """Return whether the region is in its weekday regular session."""
+        zones = {
+            MarketRegion.US: ("America/New_York", dt_time(9, 30), dt_time(16, 0)),
+            MarketRegion.EU: ("Europe/Berlin", dt_time(9, 0), dt_time(17, 30)),
+            MarketRegion.KOREA: ("Asia/Seoul", dt_time(9, 0), dt_time(15, 30)),
+        }
+        zone, opening, closing = zones[region]
+        now = datetime.now(ZoneInfo(zone))
+        return now.weekday() < 5 and opening <= now.time() <= closing
         # 미국 주식 거래 설정 확인
         if self.global_config.ENABLE_US_STOCK_TRADING:
             if self.config.alpaca_config is None:
@@ -175,6 +188,8 @@ class TradingBot:
         if not self.global_config.ENABLE_GLOBAL_TRADING or not self.global_config.ENABLE_US_STOCK_TRADING:
             logger.debug("미국 주식 거래가 비활성화되어 있습니다")
             return {"status": "disabled", "region": "US"}
+        if not self._market_open(MarketRegion.US):
+            return {"status": "closed", "region": "US", "trades": [], "errors": []}
 
         result = {
             "status": "pending",
@@ -201,6 +216,8 @@ class TradingBot:
                         if trade_signal:
                             trade_result = self._execute_us_stock_trade(symbol, trade_signal)
                             result["trades"].append(trade_result)
+                            if trade_result["status"] != "unreconciled":
+                                result["errors"].append(f"{symbol}: {trade_result['status']}")
                             self.send_notification(
                                 f"미국 주식 거래 - {symbol}",
                                 f"신호: {trade_signal['action']}\n가격: ${price:,.2f}",
@@ -214,7 +231,7 @@ class TradingBot:
                     logger.error(f"  ✗ {error_msg}")
                     result["errors"].append(error_msg)
 
-            result["status"] = "completed" if not result["errors"] else "partial"
+            result["status"] = "unreconciled" if result["trades"] and not result["errors"] else ("no_orders" if not result["errors"] else "partial")
 
         except Exception as e:
             logger.error(f"미국 주식 거래 중 오류: {e}")
@@ -240,6 +257,8 @@ class TradingBot:
         if not self.global_config.ENABLE_GLOBAL_TRADING or not self.global_config.ENABLE_EU_STOCK_TRADING:
             logger.debug("유럽 주식 거래가 비활성화되어 있습니다")
             return {"status": "disabled", "region": "EU"}
+        if not self._market_open(MarketRegion.EU):
+            return {"status": "closed", "region": "EU", "trades": [], "errors": []}
 
         result = {
             "status": "pending",
@@ -265,6 +284,8 @@ class TradingBot:
                         if trade_signal:
                             trade_result = self._execute_eu_stock_trade(symbol, trade_signal)
                             result["trades"].append(trade_result)
+                            if trade_result["status"] != "unreconciled":
+                                result["errors"].append(f"{symbol}: {trade_result['status']}")
                             self.send_notification(
                                 f"유럽 주식 거래 - {symbol}",
                                 f"신호: {trade_signal['action']}\n가격: {price:,.2f} EUR",
@@ -278,7 +299,7 @@ class TradingBot:
                     logger.error(f"  ✗ {error_msg}")
                     result["errors"].append(error_msg)
 
-            result["status"] = "completed" if not result["errors"] else "partial"
+            result["status"] = "unreconciled" if result["trades"] and not result["errors"] else ("no_orders" if not result["errors"] else "partial")
 
         except Exception as e:
             logger.error(f"유럽 주식 거래 중 오류: {e}")
@@ -399,14 +420,18 @@ class TradingBot:
         try:
             if signal["action"] == "buy":
                 order = self.engine.buy_us_stock(symbol, signal["qty"], signal["price"])
-                trade_result["order_id"] = order.get("order_id", "N/A")
-                trade_result["status"] = "completed"
+                receipt = submission_receipt(order)
+                trade_result["order_id"] = receipt.order_id
+                trade_result["status"] = receipt.status.lower()
+                trade_result["broker_status"] = receipt.broker_status
                 logger.info(f"  ✓ {symbol} 매수 주문 실행")
 
             elif signal["action"] == "sell":
                 order = self.engine.sell_us_stock(symbol, signal["qty"], signal["price"])
-                trade_result["order_id"] = order.get("order_id", "N/A")
-                trade_result["status"] = "completed"
+                receipt = submission_receipt(order)
+                trade_result["order_id"] = receipt.order_id
+                trade_result["status"] = receipt.status.lower()
+                trade_result["broker_status"] = receipt.broker_status
                 logger.info(f"  ✓ {symbol} 매도 주문 실행")
 
             # 거래 히스토리에 기록
@@ -415,7 +440,7 @@ class TradingBot:
 
         except Exception as e:
             logger.error(f"  ✗ {symbol} 거래 실행 실패: {e}")
-            trade_result["status"] = "failed"
+            trade_result["status"] = "not_sent" if isinstance(e, UnsupportedOperationError) else "unknown"
             trade_result["error"] = str(e)
 
         return trade_result
@@ -441,14 +466,18 @@ class TradingBot:
         try:
             if signal["action"] == "buy":
                 order = self.engine.buy_eu_stock(symbol, signal["qty"], signal["price"])
-                trade_result["order_id"] = order.get("order_id", "N/A")
-                trade_result["status"] = "completed"
+                receipt = submission_receipt(order)
+                trade_result["order_id"] = receipt.order_id
+                trade_result["status"] = receipt.status.lower()
+                trade_result["broker_status"] = receipt.broker_status
                 logger.info(f"  ✓ {symbol} 매수 주문 실행")
 
             elif signal["action"] == "sell":
                 order = self.engine.sell_eu_stock(symbol, signal["qty"], signal["price"])
-                trade_result["order_id"] = order.get("order_id", "N/A")
-                trade_result["status"] = "completed"
+                receipt = submission_receipt(order)
+                trade_result["order_id"] = receipt.order_id
+                trade_result["status"] = receipt.status.lower()
+                trade_result["broker_status"] = receipt.broker_status
                 logger.info(f"  ✓ {symbol} 매도 주문 실행")
 
             # 거래 히스토리에 기록
@@ -457,7 +486,7 @@ class TradingBot:
 
         except Exception as e:
             logger.error(f"  ✗ {symbol} 거래 실행 실패: {e}")
-            trade_result["status"] = "failed"
+            trade_result["status"] = "not_sent" if isinstance(e, UnsupportedOperationError) else "unknown"
             trade_result["error"] = str(e)
 
         return trade_result
@@ -546,9 +575,6 @@ class TradingBot:
 
         while self.is_running:
             try:
-                # 글로벌 시장 모니터링
-                monitoring_result = self.monitor_global_markets()
-
                 # 미국 주식 거래
                 if self.global_config.ENABLE_US_STOCK_TRADING:
                     us_result = self.trade_us_stocks()
