@@ -29,7 +29,7 @@ class TestTechnicalAnalyzerValidation:
 
     def test_validate_price_data_single_element(self):
         """Test validate_price_data rejects single element."""
-        with pytest.raises(AnalysisError, match="at least 2"):
+        with pytest.raises(AnalysisError, match="[Aa]t least 2"):
             TechnicalAnalyzer.validate_price_data([100.0])
 
     def test_validate_price_data_non_numeric(self):
