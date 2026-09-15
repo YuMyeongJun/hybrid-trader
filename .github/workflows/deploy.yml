@@ -1,0 +1,96 @@
+name: Deploy to PyPI
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Verify version matches tag
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=$(python setup.py --version)
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "Version mismatch: setup.py version ($VERSION) != tag ($TAG)"
+            exit 1
+          fi
+
+      - name: Build distribution
+        run: |
+          python -m build
+
+      - name: Check distribution
+        run: |
+          twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Create GitHub Release notes
+        uses: actions/create-release@v1
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            ## Changes in this Release
+
+            See the [Changelog](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+
+            ### Installation
+
+            Install the latest version from PyPI:
+
+            ```bash
+            pip install --upgrade hybrid-trader
+            ```
+
+            ### PyPI Package
+
+            This release has been published to PyPI: https://pypi.org/project/hybrid-trader/
+          draft: false
+          prerelease: false
+
+  test-install:
+    needs: deploy
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Wait for package to be available on PyPI
+        run: |
+          sleep 30
+
+      - name: Install and test package from PyPI
+        run: |
+          python -m pip install --upgrade pip
+          pip install hybrid-trader
+          python -c "import hybrid_trader; print(f'Successfully installed hybrid-trader')"
