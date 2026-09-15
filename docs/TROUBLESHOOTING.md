@@ -866,4 +866,4 @@ except Exception as e:
 
 ---
 
-**문제가 해결되지 않으면 [Issues](https://github.com/yourusername/hybrid-trader/issues)에서 문의해주세요.**
+**문제가 해결되지 않으면 [Issues](https://github.com/YuMyeongJun/hybrid-trader/issues)에서 문의해주세요.**

@@ -19,7 +19,7 @@ Hybrid Trader 프로젝트에 기여하고 싶으신가요? 이 가이드를 따
 
 ### 1. 버그 보고
 
-버그를 발견했다면 [Issues](https://github.com/yourusername/hybrid-trader/issues)에서 보고해주세요.
+버그를 발견했다면 [Issues](https://github.com/YuMyeongJun/hybrid-trader/issues)에서 보고해주세요.
 
 **버그 보고 템플릿**:
 
@@ -51,7 +51,7 @@ Hybrid Trader 프로젝트에 기여하고 싶으신가요? 이 가이드를 따
 
 ### 2. 기능 제안
 
-새로운 기능을 제안하려면 [Issues](https://github.com/yourusername/hybrid-trader/issues)에서 "Feature Request"로 작성해주세요.
+새로운 기능을 제안하려면 [Issues](https://github.com/YuMyeongJun/hybrid-trader/issues)에서 "Feature Request"로 작성해주세요.
 
 **기능 제안 템플릿**:
 

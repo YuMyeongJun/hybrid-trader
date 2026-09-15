@@ -62,7 +62,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "python-kis>=0.3.0",
-        "pyupbit>=0.2.35",
+        "pyupbit>=0.2.34",
         "requests>=2.28.0",
         "pandas>=1.5.0",
     ],

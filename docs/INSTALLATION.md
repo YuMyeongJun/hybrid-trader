@@ -40,7 +40,7 @@ pandas>=1.5.0          # 데이터 분석
 
 ```bash
 # GitHub에서 클론
-git clone https://github.com/yourusername/hybrid-trader.git
+git clone https://github.com/YuMyeongJun/hybrid-trader.git
 cd hybrid-trader
 
 # 또는 ZIP 다운로드 후 압축 해제
@@ -473,4 +473,4 @@ logging.basicConfig(level=logging.WARNING)
 
 **문제가 있으신가요?**
 - [Troubleshooting Guide](./TROUBLESHOOTING.md)를 참고하세요
-- [Issues](https://github.com/yourusername/hybrid-trader/issues)에서 질문하세요
+- [Issues](https://github.com/YuMyeongJun/hybrid-trader/issues)에서 질문하세요

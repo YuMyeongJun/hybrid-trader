@@ -1,0 +1,360 @@
+name: Advanced Tests & Coverage
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  # Comprehensive test suite across multiple Python versions
+  test-matrix:
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        exclude:
+          # Reduce matrix size for faster feedback
+          - os: macos-latest
+            python-version: '3.8'
+          - os: windows-latest
+            python-version: '3.8'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint with flake8
+        run: |
+          flake8 hybrid_trader --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 hybrid_trader --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Type check with mypy
+        run: |
+          mypy hybrid_trader --ignore-missing-imports || true
+
+      - name: Run unit tests
+        run: |
+          pytest tests/test_*.py -v --tb=short -m "unit" --junit-xml=test-results-unit.xml
+
+      - name: Run integration tests
+        run: |
+          pytest tests/test_*.py -v --tb=short -m "integration" --junit-xml=test-results-integration.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: test-results*.xml
+          retention-days: 30
+
+  # Comprehensive coverage analysis
+  coverage:
+    name: Coverage Analysis
+    runs-on: ubuntu-latest
+    needs: test-matrix
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v \
+            --cov=hybrid_trader \
+            --cov-report=term-color \
+            --cov-report=html:htmlcov \
+            --cov-report=xml:coverage.xml \
+            --cov-report=json:coverage.json \
+            --cov-fail-under=90 \
+            --junit-xml=test-results.xml \
+            --html=htmlcov/index.html \
+            --self-contained-html
+
+      - name: Check coverage threshold
+        run: |
+          python -c "
+          import json
+          with open('coverage.json') as f:
+              data = json.load(f)
+              total = data['totals']['percent_covered']
+              print(f'Total coverage: {total:.2f}%')
+              if total < 90:
+                  print('ERROR: Coverage is below 90% threshold!')
+                  exit(1)
+          "
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-advanced
+          fail_ci_if_error: false
+
+      - name: Archive coverage reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: |
+            htmlcov/
+            coverage.xml
+            coverage.json
+          retention-days: 30
+
+      - name: Comment PR with coverage
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const coverage = JSON.parse(fs.readFileSync('coverage.json', 'utf8'));
+            const total = coverage.totals.percent_covered;
+            const lines_covered = coverage.totals.covered_lines;
+            const lines_total = coverage.totals.num_statements;
+
+            const comment = `## Code Coverage Report
+
+            - **Total Coverage**: ${total.toFixed(2)}%
+            - **Lines Covered**: ${lines_covered}/${lines_total}
+
+            [View detailed coverage report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  # Performance tests
+  performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: test-matrix
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run performance tests
+        run: |
+          pytest tests/test_performance.py -v -m performance --tb=short --junit-xml=test-results-performance.xml
+
+      - name: Run performance benchmarks
+        run: |
+          pytest tests/test_performance.py -v -m performance -k "throughput or initialization_time or memory" --tb=short
+
+      - name: Upload performance results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: test-results-performance.xml
+          retention-days: 30
+
+  # Security tests
+  security:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    needs: test-matrix
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install bandit safety
+
+      - name: Run security tests
+        run: |
+          pytest tests/test_security.py -v -m security --tb=short --junit-xml=test-results-security.xml
+
+      - name: Run bandit security scan
+        run: |
+          bandit -r hybrid_trader -f json -o bandit-report.json || true
+
+      - name: Check dependencies for vulnerabilities
+        run: |
+          safety check --json || true
+
+      - name: Upload security results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-results
+          path: |
+            test-results-security.xml
+            bandit-report.json
+          retention-days: 30
+
+  # Edge case and validation tests
+  edge-cases:
+    name: Edge Case & Validation Tests
+    runs-on: ubuntu-latest
+    needs: test-matrix
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run edge case tests
+        run: |
+          pytest tests/test_edge_cases.py -v -m edge_case --tb=short --junit-xml=test-results-edge-cases.xml
+
+      - name: Run data validation tests
+        run: |
+          pytest tests/test_data_validation.py -v -m data_validation --tb=short --junit-xml=test-results-data-validation.xml
+
+      - name: Upload edge case results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: edge-case-results
+          path: |
+            test-results-edge-cases.xml
+            test-results-data-validation.xml
+          retention-days: 30
+
+  # API Integration tests
+  api-integration:
+    name: API Integration Tests
+    runs-on: ubuntu-latest
+    needs: test-matrix
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run API integration tests
+        run: |
+          pytest tests/test_api_integration.py -v -m "api or integration" --tb=short --junit-xml=test-results-api-integration.xml
+
+      - name: Upload API integration results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-integration-results
+          path: test-results-api-integration.xml
+          retention-days: 30
+
+  # Test report aggregation and summary
+  test-report:
+    name: Test Report Summary
+    runs-on: ubuntu-latest
+    needs: [coverage, performance, security, edge-cases, api-integration]
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: '**/test-results*.xml'
+          check_name: Test Results
+          comment_mode: always
+
+      - name: Generate badges
+        run: |
+          echo "Generating coverage badge..."
+          # Placeholder for badge generation
+          echo "Coverage badge would be generated here"
+
+      - name: Create summary report
+        run: |
+          echo "# Test Summary Report" > summary.md
+          echo "" >> summary.md
+          echo "## Status" >> summary.md
+          echo "- Build: Completed" >> summary.md
+          echo "- Coverage: Analyzed" >> summary.md
+          echo "- Performance: Tested" >> summary.md
+          echo "- Security: Scanned" >> summary.md
+          echo "" >> summary.md
+          echo "[View detailed reports in artifacts]" >> summary.md
+          cat summary.md
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-summary
+          path: summary.md
+          retention-days: 30
