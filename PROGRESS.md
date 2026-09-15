@@ -23,7 +23,7 @@
 
 ## 다음 작업 순서
 
-1. 공통 체결 비용 모델 추가: commission, tax, slippage, FX (모델 추가 완료, 보고서 연결 미완료)
+1. 공통 체결 비용 모델 추가: commission, tax, slippage, FX (보고서·백테스트 연결 완료, 실거래 체결 원장 연결 미완료)
 2. 백테스트와 실시간 보고서가 동일 비용 모델 사용
 3. DB 체결 원장에 broker/order/fill 식별자와 idempotency 추가
 4. 계좌별 노출·예약 현금·중복 주문·일일 손실 한도 추가
