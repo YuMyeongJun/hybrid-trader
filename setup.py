@@ -69,6 +69,10 @@ setup(
         "kis": [
             "python-kis>=0.3.0",
         ],
+        "global": [
+            "alpaca-trade-api>=3.0.0",
+            "ib-insync>=10.0.0",
+        ],
         "dev": [
             "pytest>=7.0",
             "pytest-cov>=3.0",
@@ -81,6 +85,8 @@ setup(
             "isort>=5.0",
             "mypy>=0.950",
             "python-kis>=0.3.0",
+            "alpaca-trade-api>=3.0.0",
+            "ib-insync>=10.0.0",
         ],
         "test": [
             "pytest>=7.0",
@@ -90,6 +96,8 @@ setup(
             "pytest-html>=3.1.0",
             "psutil>=5.9.0",
             "python-kis>=0.3.0",
+            "alpaca-trade-api>=3.0.0",
+            "ib-insync>=10.0.0",
         ],
         "lint": [
             "black>=22.0",
