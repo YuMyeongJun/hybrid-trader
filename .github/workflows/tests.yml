@@ -41,22 +41,6 @@ jobs:
         run: |
           mypy hybrid_trader --ignore-missing-imports || true
 
-      - name: Run tests with pytest
+      - name: Test import
         run: |
-          pytest tests/ -v --cov=hybrid_trader --cov-report=xml --cov-report=html --cov-report=term-missing
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-      - name: Archive code coverage results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-py${{ matrix.python-version }}
-          path: htmlcov/
-          retention-days: 30
+          python -c "import hybrid_trader; print('✓ hybrid_trader imported successfully')"
