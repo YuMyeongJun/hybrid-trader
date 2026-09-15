@@ -4,11 +4,18 @@ This module provides the HybridTradingEngine class that unifies Korea Investment
 Securities (KIS) and Upbit APIs into a single, easy-to-use interface.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 import time
 
 from .config import TradingConfig
+from .exceptions import (
+    HybridTraderException,
+    InvalidTickerError,
+    APIConnectionError,
+    ConfigurationError,
+    SessionNotInitializedError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,10 +64,16 @@ class HybridTradingEngine:
             config (TradingConfig): Trading configuration with API credentials.
 
         Raises:
-            ValueError: If configuration validation fails.
+            ConfigurationError: If configuration validation fails.
         """
         self.config = config
-        self.config.validate()
+        try:
+            self.config.validate()
+        except Exception as e:
+            raise ConfigurationError(
+                config_key="TradingConfig",
+                message=f"Configuration validation failed: {str(e)}"
+            ) from e
 
         self._kis_session = None
         self._upbit_session = None
@@ -75,6 +88,10 @@ class HybridTradingEngine:
 
         Returns:
             KIS session object
+
+        Raises:
+            SessionNotInitializedError: If KIS session initialization fails.
+            APIConnectionError: If API connection fails.
         """
         if self._kis_session is None:
             try:
@@ -86,12 +103,20 @@ class HybridTradingEngine:
                     demo=self.config.kis_config.is_demo
                 )
                 logger.info("KIS session initialized successfully")
-            except ImportError:
+            except ImportError as e:
                 logger.error("python-kis library is not installed. Run: pip install python-kis")
-                raise ImportError("python-kis is required. Install with: pip install python-kis")
+                raise SessionNotInitializedError(
+                    session_name="KIS",
+                    required_config="python-kis library",
+                    message="python-kis library is not installed. Install with: pip install python-kis"
+                ) from e
             except Exception as e:
                 logger.error(f"Failed to initialize KIS session: {e}")
-                raise
+                raise APIConnectionError(
+                    api_name="KIS",
+                    original_error=e,
+                    message=f"Failed to connect to KIS API during session initialization"
+                ) from e
 
         return self._kis_session
 
@@ -103,6 +128,10 @@ class HybridTradingEngine:
 
         Returns:
             Upbit session object
+
+        Raises:
+            SessionNotInitializedError: If Upbit session initialization fails.
+            APIConnectionError: If API connection fails.
         """
         if self._upbit_session is None:
             try:
@@ -113,12 +142,20 @@ class HybridTradingEngine:
                     secret=self.config.upbit_config.secret_key
                 )
                 logger.info("Upbit session initialized successfully")
-            except ImportError:
+            except ImportError as e:
                 logger.error("pyupbit library is not installed. Run: pip install pyupbit")
-                raise ImportError("pyupbit is required. Install with: pip install pyupbit")
+                raise SessionNotInitializedError(
+                    session_name="Upbit",
+                    required_config="pyupbit library",
+                    message="pyupbit library is not installed. Install with: pip install pyupbit"
+                ) from e
             except Exception as e:
                 logger.error(f"Failed to initialize Upbit session: {e}")
-                raise
+                raise APIConnectionError(
+                    api_name="Upbit",
+                    original_error=e,
+                    message=f"Failed to connect to Upbit API during session initialization"
+                ) from e
 
         return self._upbit_session
 
@@ -134,8 +171,8 @@ class HybridTradingEngine:
             Optional[float]: Current stock price in KRW, or None if unavailable.
 
         Raises:
-            ValueError: If ticker format is invalid.
-            Exception: If API request fails after retry attempts.
+            InvalidTickerError: If ticker format is invalid.
+            APIConnectionError: If API request fails after retry attempts.
 
         Example:
             >>> engine = HybridTradingEngine(config)
@@ -143,7 +180,11 @@ class HybridTradingEngine:
             >>> print(f"Samsung Electronics: {price:,.0f} KRW")
         """
         if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
+            raise InvalidTickerError(
+                ticker=ticker,
+                market="stock",
+                message="Ticker must be a non-empty string"
+            )
 
         try:
             logger.info(f"Fetching stock price for ticker: {ticker}")
@@ -160,9 +201,17 @@ class HybridTradingEngine:
 
             return price
 
+        except InvalidTickerError:
+            raise
+        except HybridTraderException:
+            raise
         except Exception as e:
             logger.error(f"Failed to get stock price for {ticker}: {e}")
-            return None
+            raise APIConnectionError(
+                api_name="KIS",
+                original_error=e,
+                message=f"Failed to fetch stock price for {ticker}"
+            ) from e
 
     def get_coin_price(self, ticker: str) -> Optional[float]:
         """Get current cryptocurrency price from Upbit.
@@ -176,8 +225,8 @@ class HybridTradingEngine:
             Optional[float]: Current crypto price in KRW, or None if unavailable.
 
         Raises:
-            ValueError: If ticker format is invalid.
-            Exception: If API request fails after retry attempts.
+            InvalidTickerError: If ticker format is invalid.
+            APIConnectionError: If API request fails after retry attempts.
 
         Example:
             >>> engine = HybridTradingEngine(config)
@@ -185,7 +234,11 @@ class HybridTradingEngine:
             >>> print(f"Bitcoin: {price:,.0f} KRW")
         """
         if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
+            raise InvalidTickerError(
+                ticker=ticker,
+                market="crypto",
+                message="Ticker must be a non-empty string"
+            )
 
         try:
             logger.info(f"Fetching crypto price for ticker: {ticker}")
@@ -202,9 +255,17 @@ class HybridTradingEngine:
 
             return price
 
+        except InvalidTickerError:
+            raise
+        except HybridTraderException:
+            raise
         except Exception as e:
             logger.error(f"Failed to get crypto price for {ticker}: {e}")
-            return None
+            raise APIConnectionError(
+                api_name="Upbit",
+                original_error=e,
+                message=f"Failed to fetch crypto price for {ticker}"
+            ) from e
 
     def _call_kis_api(
         self,
@@ -225,7 +286,7 @@ class HybridTradingEngine:
             Any: API response data
 
         Raises:
-            Exception: If API call fails after all retries
+            APIConnectionError: If API call fails after all retries
         """
         params = params or {}
 
@@ -248,7 +309,11 @@ class HybridTradingEngine:
             except Exception as e:
                 if attempt == self.config.retry_count - 1:
                     logger.error(f"KIS API call failed after {self.config.retry_count} attempts: {e}")
-                    raise
+                    raise APIConnectionError(
+                        api_name="KIS",
+                        original_error=e,
+                        message=f"KIS API call to {endpoint} failed after {self.config.retry_count} attempts"
+                    ) from e
                 logger.warning(f"KIS API call failed (attempt {attempt + 1}/{self.config.retry_count}), retrying...")
                 time.sleep(1)
 
@@ -271,7 +336,7 @@ class HybridTradingEngine:
             Any: API response data
 
         Raises:
-            Exception: If API call fails after all retries
+            APIConnectionError: If API call fails after all retries
         """
         params = params or {}
 
@@ -294,9 +359,421 @@ class HybridTradingEngine:
             except Exception as e:
                 if attempt == self.config.retry_count - 1:
                     logger.error(f"Upbit API call failed after {self.config.retry_count} attempts: {e}")
-                    raise
+                    raise APIConnectionError(
+                        api_name="Upbit",
+                        original_error=e,
+                        message=f"Upbit API call to {endpoint} failed after {self.config.retry_count} attempts"
+                    ) from e
                 logger.warning(f"Upbit API call failed (attempt {attempt + 1}/{self.config.retry_count}), retrying...")
                 time.sleep(1)
+
+    def buy_stock(self, ticker: str, qty: int, price: float) -> Dict[str, Any]:
+        """Buy stocks through Korea Investment & Securities.
+
+        한국투자증권을 통해 주식을 매수합니다.
+
+        Args:
+            ticker (str): Stock ticker code (e.g., "005930" for Samsung Electronics)
+            qty (int): Quantity to buy
+            price (float): Purchase price per share in KRW
+
+        Returns:
+            Dict[str, Any]: Order information containing order_id, status, etc.
+
+        Raises:
+            ValueError: If parameters are invalid.
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> result = engine.buy_stock("005930", qty=10, price=70000)
+            >>> print(result['order_id'])
+        """
+        if not ticker or not isinstance(ticker, str):
+            raise ValueError("Ticker must be a non-empty string")
+        if not isinstance(qty, int) or qty <= 0:
+            raise ValueError("Quantity must be a positive integer")
+        if not isinstance(price, (int, float)) or price <= 0:
+            raise ValueError("Price must be a positive number")
+
+        try:
+            logger.info(f"Buying stock: ticker={ticker}, qty={qty}, price={price}")
+
+            order_result = self._call_kis_api(
+                endpoint="/stock/buy",
+                params={
+                    "ticker": ticker,
+                    "qty": qty,
+                    "price": price,
+                    "account": self.config.kis_config.account_number
+                },
+                method="POST"
+            )
+
+            logger.info(f"Stock buy order placed successfully: {order_result}")
+            return order_result
+
+        except Exception as e:
+            logger.error(f"Failed to buy stock {ticker}: {e}")
+            raise
+
+    def sell_stock(self, ticker: str, qty: int, price: float) -> Dict[str, Any]:
+        """Sell stocks through Korea Investment & Securities.
+
+        한국투자증권을 통해 주식을 매도합니다.
+
+        Args:
+            ticker (str): Stock ticker code (e.g., "005930" for Samsung Electronics)
+            qty (int): Quantity to sell
+            price (float): Selling price per share in KRW
+
+        Returns:
+            Dict[str, Any]: Order information containing order_id, status, etc.
+
+        Raises:
+            ValueError: If parameters are invalid.
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> result = engine.sell_stock("005930", qty=5, price=75000)
+            >>> print(result['order_id'])
+        """
+        if not ticker or not isinstance(ticker, str):
+            raise ValueError("Ticker must be a non-empty string")
+        if not isinstance(qty, int) or qty <= 0:
+            raise ValueError("Quantity must be a positive integer")
+        if not isinstance(price, (int, float)) or price <= 0:
+            raise ValueError("Price must be a positive number")
+
+        try:
+            logger.info(f"Selling stock: ticker={ticker}, qty={qty}, price={price}")
+
+            order_result = self._call_kis_api(
+                endpoint="/stock/sell",
+                params={
+                    "ticker": ticker,
+                    "qty": qty,
+                    "price": price,
+                    "account": self.config.kis_config.account_number
+                },
+                method="POST"
+            )
+
+            logger.info(f"Stock sell order placed successfully: {order_result}")
+            return order_result
+
+        except Exception as e:
+            logger.error(f"Failed to sell stock {ticker}: {e}")
+            raise
+
+    def buy_coin(self, market: str, krw: float) -> Dict[str, Any]:
+        """Buy cryptocurrency through Upbit.
+
+        업비트를 통해 암호화폐를 매수합니다.
+
+        Args:
+            market (str): Cryptocurrency market code (e.g., "KRW-BTC" for Bitcoin)
+            krw (float): Amount in KRW to spend
+
+        Returns:
+            Dict[str, Any]: Order information containing order_id, status, etc.
+
+        Raises:
+            ValueError: If parameters are invalid.
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> result = engine.buy_coin("KRW-BTC", krw=100000)
+            >>> print(result['order_id'])
+        """
+        if not market or not isinstance(market, str):
+            raise ValueError("Market must be a non-empty string")
+        if not isinstance(krw, (int, float)) or krw <= 0:
+            raise ValueError("KRW amount must be a positive number")
+
+        try:
+            logger.info(f"Buying coin: market={market}, krw={krw}")
+
+            order_result = self._call_upbit_api(
+                endpoint="/orders",
+                params={
+                    "market": market,
+                    "side": "bid",
+                    "price": krw,
+                    "ord_type": "price"
+                },
+                method="POST"
+            )
+
+            logger.info(f"Coin buy order placed successfully: {order_result}")
+            return order_result
+
+        except Exception as e:
+            logger.error(f"Failed to buy coin {market}: {e}")
+            raise
+
+    def sell_coin(self, market: str, qty: float) -> Dict[str, Any]:
+        """Sell cryptocurrency through Upbit.
+
+        업비트를 통해 암호화폐를 매도합니다.
+
+        Args:
+            market (str): Cryptocurrency market code (e.g., "KRW-BTC" for Bitcoin)
+            qty (float): Quantity of cryptocurrency to sell
+
+        Returns:
+            Dict[str, Any]: Order information containing order_id, status, etc.
+
+        Raises:
+            ValueError: If parameters are invalid.
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> result = engine.sell_coin("KRW-BTC", qty=0.5)
+            >>> print(result['order_id'])
+        """
+        if not market or not isinstance(market, str):
+            raise ValueError("Market must be a non-empty string")
+        if not isinstance(qty, (int, float)) or qty <= 0:
+            raise ValueError("Quantity must be a positive number")
+
+        try:
+            logger.info(f"Selling coin: market={market}, qty={qty}")
+
+            order_result = self._call_upbit_api(
+                endpoint="/orders",
+                params={
+                    "market": market,
+                    "side": "ask",
+                    "volume": qty,
+                    "ord_type": "market"
+                },
+                method="POST"
+            )
+
+            logger.info(f"Coin sell order placed successfully: {order_result}")
+            return order_result
+
+        except Exception as e:
+            logger.error(f"Failed to sell coin {market}: {e}")
+            raise
+
+    def get_stock_balance(self) -> Dict[str, Any]:
+        """Get stock portfolio balance from Korea Investment & Securities.
+
+        한국투자증권에서 주식 잔고를 조회합니다.
+
+        Returns:
+            Dict[str, Any]: Stock balance information including holdings, valuations, etc.
+
+        Raises:
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> balance = engine.get_stock_balance()
+            >>> print(f"Total valuation: {balance['total_valuation']:,.0f} KRW")
+        """
+        try:
+            logger.info("Fetching stock balance from KIS")
+
+            balance = self._call_kis_api(
+                endpoint="/accounts/balance",
+                params={"account": self.config.kis_config.account_number},
+                method="GET"
+            )
+
+            logger.info(f"Stock balance retrieved successfully")
+            return balance or {}
+
+        except Exception as e:
+            logger.error(f"Failed to get stock balance: {e}")
+            raise
+
+    def get_coin_balance(self) -> Dict[str, Any]:
+        """Get cryptocurrency portfolio balance from Upbit.
+
+        업비트에서 암호화폐 잔고를 조회합니다.
+
+        Returns:
+            Dict[str, Any]: Crypto balance information including holdings, valuations, etc.
+
+        Raises:
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> balance = engine.get_coin_balance()
+            >>> print(f"Bitcoin holdings: {balance.get('KRW-BTC', {}).get('balance', 0)}")
+        """
+        try:
+            logger.info("Fetching coin balance from Upbit")
+
+            balance = self._call_upbit_api(
+                endpoint="/accounts",
+                params={},
+                method="GET"
+            )
+
+            logger.info(f"Coin balance retrieved successfully")
+            return balance or {}
+
+        except Exception as e:
+            logger.error(f"Failed to get coin balance: {e}")
+            raise
+
+    def get_total_balance(self) -> Dict[str, Any]:
+        """Get total balance combining stocks and cryptocurrencies.
+
+        주식과 암호화폐 잔고를 합산한 전체 자산을 조회합니다.
+
+        Returns:
+            Dict[str, Any]: Combined balance with stocks, coins, total valuation, and cash.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> total = engine.get_total_balance()
+            >>> print(f"Total assets: {total['total_valuation']:,.0f} KRW")
+        """
+        try:
+            logger.info("Fetching total balance (stocks + coins)")
+
+            stock_balance = self.get_stock_balance()
+            coin_balance = self.get_coin_balance()
+
+            total_valuation = 0
+            if stock_balance:
+                total_valuation += stock_balance.get("total_valuation", 0)
+            if coin_balance:
+                total_valuation += coin_balance.get("total_valuation", 0)
+
+            result = {
+                "stocks": stock_balance,
+                "coins": coin_balance,
+                "total_valuation": total_valuation,
+                "timestamp": time.time()
+            }
+
+            logger.info(f"Total balance: {total_valuation:,.0f} KRW")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get total balance: {e}")
+            raise
+
+    def get_order_history(self, ticker: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get order history for a specific stock or crypto.
+
+        특정 종목의 주문 히스토리를 조회합니다.
+
+        Args:
+            ticker (str): Stock/Crypto ticker code (e.g., "005930" for stock or "KRW-BTC" for crypto)
+            limit (int): Maximum number of orders to retrieve. Defaults to 10.
+
+        Returns:
+            List[Dict[str, Any]]: List of order information including order_id, price, quantity, status, etc.
+
+        Raises:
+            ValueError: If parameters are invalid.
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> history = engine.get_order_history("005930", limit=20)
+            >>> for order in history:
+            ...     print(f"{order['ticker']}: {order['qty']} @ {order['price']}")
+        """
+        if not ticker or not isinstance(ticker, str):
+            raise ValueError("Ticker must be a non-empty string")
+        if not isinstance(limit, int) or limit <= 0:
+            raise ValueError("Limit must be a positive integer")
+
+        try:
+            logger.info(f"Fetching order history for {ticker} (limit={limit})")
+
+            # Determine if it's stock or crypto based on ticker format
+            is_crypto = ticker.startswith("KRW-")
+
+            if is_crypto:
+                endpoint = "/orders"
+                params = {"market": ticker, "limit": limit}
+            else:
+                endpoint = "/orders/history"
+                params = {"ticker": ticker, "account": self.config.kis_config.account_number, "limit": limit}
+
+            history = self._call_kis_api(
+                endpoint=endpoint,
+                params=params,
+                method="GET"
+            ) if not is_crypto else self._call_upbit_api(
+                endpoint=endpoint,
+                params=params,
+                method="GET"
+            )
+
+            logger.info(f"Order history retrieved: {len(history or []) if isinstance(history, list) else 0} orders")
+            return history if isinstance(history, list) else []
+
+        except Exception as e:
+            logger.error(f"Failed to get order history for {ticker}: {e}")
+            raise
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel a pending order.
+
+        미체결 주문을 취소합니다.
+
+        Args:
+            order_id (str): Order ID to cancel
+
+        Returns:
+            bool: True if cancellation was successful, False otherwise.
+
+        Raises:
+            ValueError: If order_id is invalid.
+            Exception: If API request fails after retry attempts.
+
+        Example:
+            >>> engine = HybridTradingEngine(config)
+            >>> success = engine.cancel_order("order_123456")
+            >>> print(f"Cancellation: {'Success' if success else 'Failed'}")
+        """
+        if not order_id or not isinstance(order_id, str):
+            raise ValueError("Order ID must be a non-empty string")
+
+        try:
+            logger.info(f"Cancelling order: {order_id}")
+
+            # Try both KIS and Upbit APIs to cancel the order
+            result = None
+
+            try:
+                result = self._call_kis_api(
+                    endpoint="/orders/cancel",
+                    params={"order_id": order_id},
+                    method="DELETE"
+                )
+            except:
+                logger.debug(f"KIS order cancellation failed for {order_id}, trying Upbit")
+                result = self._call_upbit_api(
+                    endpoint=f"/orders/{order_id}",
+                    params={},
+                    method="DELETE"
+                )
+
+            if result:
+                logger.info(f"Order {order_id} cancelled successfully")
+                return True
+            else:
+                logger.warning(f"Order cancellation result unclear for {order_id}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to cancel order {order_id}: {e}")
+            raise
 
     def close(self) -> None:
         """Close all active sessions.

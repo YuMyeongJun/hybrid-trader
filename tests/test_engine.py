@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 from hybrid_trader.engine import HybridTradingEngine
 from hybrid_trader.config import TradingConfig, KISConfig, UpbitConfig
+from hybrid_trader.exceptions import ConfigurationError, InvalidTickerError, APIConnectionError
 
 
 @pytest.fixture
@@ -47,7 +48,7 @@ class TestHybridTradingEngineInitialization:
         )
         config = TradingConfig(kis_config=kis, upbit_config=upbit)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ConfigurationError):
             HybridTradingEngine(config)
 
 
@@ -70,26 +71,25 @@ class TestHybridTradingEngineStockPrice:
         """Test get_stock_price raises error with empty ticker."""
         engine = HybridTradingEngine(sample_config)
 
-        with pytest.raises(ValueError, match="Ticker must be a non-empty string"):
+        with pytest.raises(InvalidTickerError):
             engine.get_stock_price("")
 
     def test_get_stock_price_invalid_ticker_none(self, sample_config):
         """Test get_stock_price raises error with None ticker."""
         engine = HybridTradingEngine(sample_config)
 
-        with pytest.raises(ValueError, match="Ticker must be a non-empty string"):
+        with pytest.raises(InvalidTickerError):
             engine.get_stock_price(None)
 
     def test_get_stock_price_api_failure(self, sample_config):
-        """Test get_stock_price returns None on API failure."""
+        """Test get_stock_price raises APIConnectionError on API failure."""
         engine = HybridTradingEngine(sample_config)
 
         with patch.object(engine, '_call_kis_api') as mock_kis:
             mock_kis.side_effect = Exception("API Error")
 
-            price = engine.get_stock_price("005930")
-
-            assert price is None
+            with pytest.raises(APIConnectionError):
+                engine.get_stock_price("005930")
 
 
 class TestHybridTradingEngineCoinPrice:
@@ -111,19 +111,18 @@ class TestHybridTradingEngineCoinPrice:
         """Test get_coin_price raises error with empty ticker."""
         engine = HybridTradingEngine(sample_config)
 
-        with pytest.raises(ValueError, match="Ticker must be a non-empty string"):
+        with pytest.raises(InvalidTickerError):
             engine.get_coin_price("")
 
     def test_get_coin_price_api_failure(self, sample_config):
-        """Test get_coin_price returns None on API failure."""
+        """Test get_coin_price raises APIConnectionError on API failure."""
         engine = HybridTradingEngine(sample_config)
 
         with patch.object(engine, '_call_upbit_api') as mock_upbit:
             mock_upbit.side_effect = Exception("API Error")
 
-            price = engine.get_coin_price("KRW-BTC")
-
-            assert price is None
+            with pytest.raises(APIConnectionError):
+                engine.get_coin_price("KRW-BTC")
 
 
 class TestHybridTradingEngineContextManager:
@@ -190,3 +189,394 @@ class TestHybridTradingEngineIntegration:
 
             assert stock_price == 75500.0
             assert crypto_price == 65500000.0
+
+
+class TestHybridTradingEngineBuyStock:
+    """Test cases for buy_stock method."""
+
+    def test_buy_stock_valid_params(self, sample_config):
+        """Test buying stock with valid parameters."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.return_value = {"order_id": "12345", "status": "pending"}
+
+            result = engine.buy_stock("005930", qty=10, price=70000)
+
+            assert result["order_id"] == "12345"
+            assert result["status"] == "pending"
+            mock_kis.assert_called_once()
+
+    def test_buy_stock_invalid_ticker(self, sample_config):
+        """Test buy_stock raises error with invalid ticker."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Ticker must be a non-empty string"):
+            engine.buy_stock("", qty=10, price=70000)
+
+    def test_buy_stock_invalid_qty(self, sample_config):
+        """Test buy_stock raises error with invalid quantity."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Quantity must be a positive integer"):
+            engine.buy_stock("005930", qty=0, price=70000)
+
+        with pytest.raises(ValueError, match="Quantity must be a positive integer"):
+            engine.buy_stock("005930", qty=-5, price=70000)
+
+    def test_buy_stock_invalid_price(self, sample_config):
+        """Test buy_stock raises error with invalid price."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Price must be a positive number"):
+            engine.buy_stock("005930", qty=10, price=0)
+
+        with pytest.raises(ValueError, match="Price must be a positive number"):
+            engine.buy_stock("005930", qty=10, price=-1000)
+
+    def test_buy_stock_api_failure(self, sample_config):
+        """Test buy_stock raises exception on API failure."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.side_effect = Exception("API Error")
+
+            with pytest.raises(Exception):
+                engine.buy_stock("005930", qty=10, price=70000)
+
+
+class TestHybridTradingEngineSellStock:
+    """Test cases for sell_stock method."""
+
+    def test_sell_stock_valid_params(self, sample_config):
+        """Test selling stock with valid parameters."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.return_value = {"order_id": "54321", "status": "pending"}
+
+            result = engine.sell_stock("005930", qty=5, price=75000)
+
+            assert result["order_id"] == "54321"
+            assert result["status"] == "pending"
+            mock_kis.assert_called_once()
+
+    def test_sell_stock_invalid_ticker(self, sample_config):
+        """Test sell_stock raises error with invalid ticker."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Ticker must be a non-empty string"):
+            engine.sell_stock(None, qty=5, price=75000)
+
+    def test_sell_stock_invalid_qty(self, sample_config):
+        """Test sell_stock raises error with invalid quantity."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Quantity must be a positive integer"):
+            engine.sell_stock("005930", qty=-1, price=75000)
+
+    def test_sell_stock_invalid_price(self, sample_config):
+        """Test sell_stock raises error with invalid price."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Price must be a positive number"):
+            engine.sell_stock("005930", qty=5, price=0)
+
+
+class TestHybridTradingEngineBuyCoin:
+    """Test cases for buy_coin method."""
+
+    def test_buy_coin_valid_params(self, sample_config):
+        """Test buying coin with valid parameters."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_upbit_api') as mock_upbit:
+            mock_upbit.return_value = {"order_id": "coin_12345", "status": "pending"}
+
+            result = engine.buy_coin("KRW-BTC", krw=100000)
+
+            assert result["order_id"] == "coin_12345"
+            assert result["status"] == "pending"
+            mock_upbit.assert_called_once()
+
+    def test_buy_coin_invalid_market(self, sample_config):
+        """Test buy_coin raises error with invalid market."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Market must be a non-empty string"):
+            engine.buy_coin("", krw=100000)
+
+    def test_buy_coin_invalid_krw(self, sample_config):
+        """Test buy_coin raises error with invalid KRW amount."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="KRW amount must be a positive number"):
+            engine.buy_coin("KRW-BTC", krw=0)
+
+        with pytest.raises(ValueError, match="KRW amount must be a positive number"):
+            engine.buy_coin("KRW-BTC", krw=-1000)
+
+    def test_buy_coin_api_failure(self, sample_config):
+        """Test buy_coin raises exception on API failure."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_upbit_api') as mock_upbit:
+            mock_upbit.side_effect = Exception("API Error")
+
+            with pytest.raises(Exception):
+                engine.buy_coin("KRW-BTC", krw=100000)
+
+
+class TestHybridTradingEngineSellCoin:
+    """Test cases for sell_coin method."""
+
+    def test_sell_coin_valid_params(self, sample_config):
+        """Test selling coin with valid parameters."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_upbit_api') as mock_upbit:
+            mock_upbit.return_value = {"order_id": "coin_54321", "status": "pending"}
+
+            result = engine.sell_coin("KRW-BTC", qty=0.5)
+
+            assert result["order_id"] == "coin_54321"
+            assert result["status"] == "pending"
+            mock_upbit.assert_called_once()
+
+    def test_sell_coin_invalid_market(self, sample_config):
+        """Test sell_coin raises error with invalid market."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Market must be a non-empty string"):
+            engine.sell_coin(None, qty=0.5)
+
+    def test_sell_coin_invalid_qty(self, sample_config):
+        """Test sell_coin raises error with invalid quantity."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Quantity must be a positive number"):
+            engine.sell_coin("KRW-BTC", qty=0)
+
+        with pytest.raises(ValueError, match="Quantity must be a positive number"):
+            engine.sell_coin("KRW-BTC", qty=-0.1)
+
+
+class TestHybridTradingEngineBalance:
+    """Test cases for balance-related methods."""
+
+    def test_get_stock_balance(self, sample_config):
+        """Test getting stock balance."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.return_value = {
+                "total_valuation": 5000000,
+                "holdings": [{"ticker": "005930", "qty": 10, "price": 75500}]
+            }
+
+            balance = engine.get_stock_balance()
+
+            assert balance["total_valuation"] == 5000000
+            assert len(balance["holdings"]) == 1
+            mock_kis.assert_called_once()
+
+    def test_get_stock_balance_api_failure(self, sample_config):
+        """Test get_stock_balance raises exception on API failure."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.side_effect = Exception("API Error")
+
+            with pytest.raises(Exception):
+                engine.get_stock_balance()
+
+    def test_get_coin_balance(self, sample_config):
+        """Test getting coin balance."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_upbit_api') as mock_upbit:
+            mock_upbit.return_value = {
+                "KRW-BTC": {"balance": 0.5, "valuation": 30000000},
+                "KRW-ETH": {"balance": 5, "valuation": 15000000}
+            }
+
+            balance = engine.get_coin_balance()
+
+            assert "KRW-BTC" in balance
+            assert "KRW-ETH" in balance
+            mock_upbit.assert_called_once()
+
+    def test_get_coin_balance_api_failure(self, sample_config):
+        """Test get_coin_balance raises exception on API failure."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_upbit_api') as mock_upbit:
+            mock_upbit.side_effect = Exception("API Error")
+
+            with pytest.raises(Exception):
+                engine.get_coin_balance()
+
+    def test_get_total_balance(self, sample_config):
+        """Test getting total balance combining stocks and coins."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, 'get_stock_balance') as mock_stock, \
+             patch.object(engine, 'get_coin_balance') as mock_coin:
+
+            mock_stock.return_value = {"total_valuation": 5000000}
+            mock_coin.return_value = {"total_valuation": 3000000}
+
+            total = engine.get_total_balance()
+
+            assert total["total_valuation"] == 8000000
+            assert "stocks" in total
+            assert "coins" in total
+            assert "timestamp" in total
+
+    def test_get_total_balance_with_exception(self, sample_config):
+        """Test get_total_balance raises exception if balance retrieval fails."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, 'get_stock_balance') as mock_stock:
+            mock_stock.side_effect = Exception("API Error")
+
+            with pytest.raises(Exception):
+                engine.get_total_balance()
+
+
+class TestHybridTradingEngineOrderHistory:
+    """Test cases for get_order_history method."""
+
+    def test_get_order_history_stock(self, sample_config):
+        """Test getting order history for stocks."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.return_value = [
+                {"order_id": "1", "ticker": "005930", "qty": 10, "price": 75000, "status": "completed"}
+            ]
+
+            history = engine.get_order_history("005930", limit=10)
+
+            assert len(history) == 1
+            assert history[0]["order_id"] == "1"
+            mock_kis.assert_called_once()
+
+    def test_get_order_history_crypto(self, sample_config):
+        """Test getting order history for cryptocurrencies."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_upbit_api') as mock_upbit:
+            mock_upbit.return_value = [
+                {"order_id": "c1", "market": "KRW-BTC", "qty": 0.5, "price": 65500000, "status": "completed"}
+            ]
+
+            history = engine.get_order_history("KRW-BTC", limit=10)
+
+            assert len(history) == 1
+            assert history[0]["order_id"] == "c1"
+            mock_upbit.assert_called_once()
+
+    def test_get_order_history_invalid_ticker(self, sample_config):
+        """Test get_order_history raises error with invalid ticker."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Ticker must be a non-empty string"):
+            engine.get_order_history("", limit=10)
+
+    def test_get_order_history_invalid_limit(self, sample_config):
+        """Test get_order_history raises error with invalid limit."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Limit must be a positive integer"):
+            engine.get_order_history("005930", limit=0)
+
+        with pytest.raises(ValueError, match="Limit must be a positive integer"):
+            engine.get_order_history("005930", limit=-5)
+
+    def test_get_order_history_empty_result(self, sample_config):
+        """Test get_order_history with empty result."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.return_value = []
+
+            history = engine.get_order_history("005930", limit=10)
+
+            assert history == []
+
+    def test_get_order_history_api_failure(self, sample_config):
+        """Test get_order_history raises exception on API failure."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.side_effect = Exception("API Error")
+
+            with pytest.raises(Exception):
+                engine.get_order_history("005930", limit=10)
+
+
+class TestHybridTradingEngineCancelOrder:
+    """Test cases for cancel_order method."""
+
+    def test_cancel_order_success(self, sample_config):
+        """Test successful order cancellation."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.return_value = {"status": "cancelled"}
+
+            result = engine.cancel_order("order_12345")
+
+            assert result is True
+            mock_kis.assert_called_once()
+
+    def test_cancel_order_fallback_to_upbit(self, sample_config):
+        """Test cancel_order falls back to Upbit API when KIS fails."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis, \
+             patch.object(engine, '_call_upbit_api') as mock_upbit:
+
+            mock_kis.side_effect = Exception("KIS Error")
+            mock_upbit.return_value = {"status": "cancelled"}
+
+            result = engine.cancel_order("order_12345")
+
+            assert result is True
+            mock_kis.assert_called_once()
+            mock_upbit.assert_called_once()
+
+    def test_cancel_order_invalid_order_id(self, sample_config):
+        """Test cancel_order raises error with invalid order ID."""
+        engine = HybridTradingEngine(sample_config)
+
+        with pytest.raises(ValueError, match="Order ID must be a non-empty string"):
+            engine.cancel_order("")
+
+        with pytest.raises(ValueError, match="Order ID must be a non-empty string"):
+            engine.cancel_order(None)
+
+    def test_cancel_order_both_apis_fail(self, sample_config):
+        """Test cancel_order raises exception when both APIs fail."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis, \
+             patch.object(engine, '_call_upbit_api') as mock_upbit:
+
+            mock_kis.side_effect = Exception("KIS Error")
+            mock_upbit.side_effect = Exception("Upbit Error")
+
+            with pytest.raises(Exception):
+                engine.cancel_order("order_12345")
+
+    def test_cancel_order_no_result(self, sample_config):
+        """Test cancel_order returns False when no result is returned."""
+        engine = HybridTradingEngine(sample_config)
+
+        with patch.object(engine, '_call_kis_api') as mock_kis:
+            mock_kis.return_value = None
+
+            result = engine.cancel_order("order_12345")
+
+            assert result is False
