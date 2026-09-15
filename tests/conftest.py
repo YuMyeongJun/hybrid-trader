@@ -3,8 +3,15 @@
 This module provides common fixtures, mock data, and configuration for all tests.
 """
 
+import sys
 import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock, MagicMock, patch
+
+# Mock external optional dependencies that may not be installed
+mock_kis = MagicMock()
+mock_kis.KISClient = MagicMock
+sys.modules['kis'] = mock_kis
+
 from hybrid_trader.config import TradingConfig, KISConfig, UpbitConfig
 from hybrid_trader.engine import HybridTradingEngine
 from hybrid_trader.analysis import TechnicalAnalyzer

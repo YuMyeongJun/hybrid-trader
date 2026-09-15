@@ -61,12 +61,14 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "python-kis>=0.3.0",
         "pyupbit>=0.2.34",
         "requests>=2.28.0",
         "pandas>=1.5.0",
     ],
     extras_require={
+        "kis": [
+            "python-kis>=0.3.0",
+        ],
         "dev": [
             "pytest>=7.0",
             "pytest-cov>=3.0",
@@ -78,6 +80,7 @@ setup(
             "flake8>=4.0",
             "isort>=5.0",
             "mypy>=0.950",
+            "python-kis>=0.3.0",
         ],
         "test": [
             "pytest>=7.0",
@@ -86,6 +89,7 @@ setup(
             "pytest-timeout>=2.1.0",
             "pytest-html>=3.1.0",
             "psutil>=5.9.0",
+            "python-kis>=0.3.0",
         ],
         "lint": [
             "black>=22.0",
