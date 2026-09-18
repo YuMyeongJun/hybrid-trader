@@ -260,7 +260,12 @@ class TechnicalAnalyzer:
         # Align EMA arrays
         macd_line = [ema_fast[i - (fast - 1) + (slow - 1)] - ema_slow[i] for i in range(len(ema_slow))]
         
-        signal_line = TechnicalAnalyzer.calculate_sma(macd_line, signal)
+        # MACD is an oscillator and may be zero/negative; price validation is
+        # inappropriate for its signal-line moving average.
+        if len(macd_line) < signal:
+            raise AnalysisError('Insufficient MACD values for signal period')
+        signal_line = [sum(macd_line[i:i + signal]) / signal
+                       for i in range(len(macd_line) - signal + 1)]
         histogram = [macd_line[i + len(macd_line) - len(signal_line)] - signal_line[i] for i in range(len(signal_line))]
         
         return {

@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from decimal import Decimal
 from hybrid_trader.engine import HybridTradingEngine
 from hybrid_trader.config import TradingConfig, KISConfig, UpbitConfig
-from hybrid_trader.exceptions import InvalidTickerError, ConfigurationError
+from hybrid_trader.exceptions import InvalidTickerError, ConfigurationError, APIConnectionError
 
 
 @pytest.mark.data_validation
@@ -119,26 +119,13 @@ class TestPriceValidation:
                 assert result is not None
 
     def test_price_range_validation(self, trading_engine):
-        """Test price range validation.
+        for value in [-1, 0, True, float('nan'), float('inf')]:
+            with patch.object(trading_engine.kis_session, 'get_price', return_value=value), pytest.raises(APIConnectionError):
+                trading_engine.get_stock_price('005930')
+        for value in [.01, 1, 100000000, 999999999999.99]:
+            with patch.object(trading_engine.kis_session, 'get_price', return_value=value):
+                assert trading_engine.get_stock_price('005930') == float(value)
 
-        가격 범위 검증 테스트
-        """
-        # Test various valid price ranges
-        valid_prices = [
-            0,
-            0.01,
-            100,
-            1000,
-            100000,
-            1000000,
-            10000000,
-        ]
-
-        for price in valid_prices:
-            with patch.object(trading_engine.kis_session, 'get_price', return_value=price):
-                result = trading_engine.get_stock_price("005930")
-                if result is not None:
-                    assert isinstance(result, (int, float))
 
     def test_price_precision(self, trading_engine):
         """Test price decimal precision.
@@ -159,130 +146,48 @@ class TestPriceValidation:
                 assert result is not None
 
     def test_price_boundary_values(self, trading_engine):
-        """Test price boundary values.
-
-        가격 경계값 테스트
-        """
-        boundary_values = [
-            -1,
-            0,
-            1,
-            100000000,
-            999999999999.99,
-        ]
-
-        for price in boundary_values:
-            with patch.object(trading_engine.kis_session, 'get_price', return_value=price):
-                result = trading_engine.get_stock_price("005930")
-                assert result is not None
+        for value in [-1, 0, True, float('nan'), float('inf')]:
+            with patch.object(trading_engine.kis_session, 'get_price', return_value=value), pytest.raises(APIConnectionError):
+                trading_engine.get_stock_price('005930')
+        for value in [.01, 1, 100000000, 999999999999.99]:
+            with patch.object(trading_engine.kis_session, 'get_price', return_value=value):
+                assert trading_engine.get_stock_price('005930') == float(value)
 
 
 @pytest.mark.data_validation
 class TestConfigValidation:
     """Test configuration validation."""
 
-    def test_kis_config_validation(self):
-        """Test KIS configuration validation.
+    def test_kis_config_validation(self, upbit_config):
+        config = TradingConfig(KISConfig('key', None, '12345678-01', 'id'), upbit_config)
+        with pytest.raises(ValueError, match='Missing required credentials'):
+            config.validate()
 
-        KIS 설정 검증 테스트
-        """
-        # Valid config
-        valid_config = KISConfig(
-            app_key="test_app_key",
-            secret_key="test_secret_key",
-            account_number="1234-5678",
-            hts_id="test_hts_id"
-        )
-        assert valid_config is not None
 
-        # Invalid - missing required fields
-        with pytest.raises((ConfigurationError, TypeError)):
-            KISConfig(
-                app_key="test_app_key",
-                secret_key=None,
-                account_number="1234-5678",
-                hts_id="test_hts_id"
-            )
+    def test_upbit_config_validation(self, kis_config):
+        config = TradingConfig(kis_config, UpbitConfig(None, 'secret'))
+        with pytest.raises(ValueError, match='Missing required credentials'):
+            config.validate()
 
-    def test_upbit_config_validation(self):
-        """Test Upbit configuration validation.
-
-        Upbit 설정 검증 테스트
-        """
-        # Valid config
-        valid_config = UpbitConfig(
-            access_key="test_access_key",
-            secret_key="test_secret_key"
-        )
-        assert valid_config is not None
-
-        # Invalid - missing required fields
-        with pytest.raises((ConfigurationError, TypeError)):
-            UpbitConfig(
-                access_key=None,
-                secret_key="test_secret_key"
-            )
 
     def test_trading_config_combined_validation(self, kis_config, upbit_config):
-        """Test combined trading configuration validation.
+        assert TradingConfig(kis_config, upbit_config).validate()
+        with pytest.raises(ValueError):
+            TradingConfig(None, None).validate()
 
-        통합 거래 설정 검증 테스트
-        """
-        # Valid combined config
-        config = TradingConfig(
-            kis_config=kis_config,
-            upbit_config=upbit_config
-        )
-        assert config is not None
-
-        # Invalid - missing both
-        with pytest.raises((ConfigurationError, TypeError)):
-            TradingConfig(
-                kis_config=None,
-                upbit_config=None
-            )
 
     def test_timeout_configuration_validation(self, kis_config, upbit_config):
-        """Test timeout configuration validation.
+        for value in [-1, 0, True, float('nan')]:
+            with pytest.raises(ValueError):
+                TradingConfig(kis_config, upbit_config, timeout=value).validate()
+        assert TradingConfig(kis_config, upbit_config, timeout=5).validate()
 
-        타임아웃 설정 검증 테스트
-        """
-        # Valid timeout
-        config = TradingConfig(
-            kis_config=kis_config,
-            upbit_config=upbit_config,
-            timeout=30
-        )
-        assert config.timeout == 30
-
-        # Invalid - negative timeout
-        with pytest.raises((ConfigurationError, ValueError)):
-            TradingConfig(
-                kis_config=kis_config,
-                upbit_config=upbit_config,
-                timeout=-1
-            )
 
     def test_retry_count_validation(self, kis_config, upbit_config):
-        """Test retry count validation.
-
-        재시도 횟수 검증 테스트
-        """
-        # Valid retry count
-        config = TradingConfig(
-            kis_config=kis_config,
-            upbit_config=upbit_config,
-            retry_count=5
-        )
-        assert config.retry_count == 5
-
-        # Invalid - negative retry count
-        with pytest.raises((ConfigurationError, ValueError)):
-            TradingConfig(
-                kis_config=kis_config,
-                upbit_config=upbit_config,
-                retry_count=-1
-            )
+        for value in [-1, 0, True, float('nan')]:
+            with pytest.raises(ValueError):
+                TradingConfig(kis_config, upbit_config, retry_count=value).validate()
+        assert TradingConfig(kis_config, upbit_config, retry_count=5).validate()
 
 
 @pytest.mark.data_validation
@@ -319,21 +224,9 @@ class TestResponseDataValidation:
                     assert isinstance(result, (int, float))
 
     def test_invalid_response_handling(self, trading_engine):
-        """Test handling of invalid API responses.
-
-        유효하지 않은 API 응답 처리 테스트
-        """
-        invalid_responses = [
-            "invalid",
-            [],
-            {},
-            {"invalid_key": 123},
-        ]
-
-        for response in invalid_responses:
-            with patch.object(trading_engine.kis_session, 'get_price', return_value=response):
-                result = trading_engine.get_stock_price("005930")
-                # Should handle gracefully - either return value or None
+        for value in ['invalid', [], {}, {'invalid_key': 123}, None]:
+            with patch.object(trading_engine.kis_session, 'get_price', return_value=value), pytest.raises(APIConnectionError):
+                trading_engine.get_stock_price('005930')
 
 
 @pytest.mark.data_validation
@@ -341,31 +234,20 @@ class TestDataTypeConsistency:
     """Test data type consistency across operations."""
 
     def test_return_type_consistency_stock(self, trading_engine):
-        """Test return type consistency for stock prices.
-
-        주식 가격 반환 타입 일관성 테스트
-        """
-        return_values = [50000, 50000.5, None]
-
-        for value in return_values:
+        for value in [50000, 50000.5]:
             with patch.object(trading_engine.kis_session, 'get_price', return_value=value):
-                result = trading_engine.get_stock_price("005930")
-                if value is None:
-                    assert result is None
-                else:
-                    assert isinstance(result, (int, float))
+                assert isinstance(trading_engine.get_stock_price('005930'), float)
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=None), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
+
 
     def test_return_type_consistency_crypto(self, trading_engine):
-        """Test return type consistency for crypto prices.
+        for value in [50000, 50000.5]:
+            with patch.object(trading_engine.upbit_session, 'get_ticker', return_value={'trade_price': value}):
+                assert isinstance(trading_engine.get_coin_price('KRW-BTC'), float)
+        with patch.object(trading_engine.upbit_session, 'get_ticker', return_value=None), pytest.raises(APIConnectionError):
+            trading_engine.get_coin_price('KRW-BTC')
 
-        암호화폐 가격 반환 타입 일관성 테스트
-        """
-        return_values = [50000000, 75500000.5, None]
-
-        for value in return_values:
-            with patch.object(trading_engine.upbit_session, 'get_ticker', return_value={"trade_price": value} if value else None):
-                result = trading_engine.get_coin_price("KRW-BTC")
-                # Check consistency
 
     def test_consistent_error_types(self, trading_engine):
         """Test consistent error types across operations.
@@ -405,29 +287,15 @@ class TestDataSanitization:
                 trading_engine.get_stock_price(ticker)
 
     def test_price_numeric_validation(self, trading_engine):
-        """Test numeric price validation.
+        for value in ['invalid', [], {}, {'invalid_key': 123}, None]:
+            with patch.object(trading_engine.kis_session, 'get_price', return_value=value), pytest.raises(APIConnectionError):
+                trading_engine.get_stock_price('005930')
 
-        숫자 가격 검증 테스트
-        """
-        with patch.object(trading_engine.kis_session, 'get_price', return_value="not a number"):
-            result = trading_engine.get_stock_price("005930")
-            # Should either raise or handle gracefully
 
     def test_response_key_validation(self, trading_engine):
-        """Test response key validation.
-
-        응답 키 검증 테스트
-        """
-        responses_missing_keys = [
-            {},
-            {"invalid": 100},
-            {"price": 50000},  # Wrong key name
-        ]
-
-        for response in responses_missing_keys:
-            with patch.object(trading_engine.upbit_session, 'get_ticker', return_value=response):
-                result = trading_engine.get_coin_price("KRW-BTC")
-                # Should handle gracefully
+        for value in [{}, {'invalid': 100}, {'price': 50000}]:
+            with patch.object(trading_engine.upbit_session, 'get_ticker', return_value=value), pytest.raises(APIConnectionError):
+                trading_engine.get_coin_price('KRW-BTC')
 
 
 @pytest.mark.data_validation

@@ -1,3 +1,4 @@
+from hybrid_trader.exceptions import APIConnectionError
 """Edge case tests for Hybrid Trader.
 
 This module tests edge cases and boundary conditions that might occur
@@ -95,23 +96,14 @@ class TestPriceEdgeCases:
     """Test edge cases with price values."""
 
     def test_zero_price(self, trading_engine):
-        """Test handling of zero price.
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=0), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
 
-        0 가격 처리 테스트
-        """
-        with patch.object(trading_engine.kis_session, 'get_price', return_value=0):
-            result = trading_engine.get_stock_price("005930")
-            assert result == 0
 
     def test_negative_price(self, trading_engine):
-        """Test handling of negative price.
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=-1), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
 
-        음수 가격 처리 테스트
-        """
-        with patch.object(trading_engine.kis_session, 'get_price', return_value=-1000):
-            result = trading_engine.get_stock_price("005930")
-            # Should either return negative or validate
-            assert result is not None
 
     def test_extremely_large_price(self, trading_engine):
         """Test handling of extremely large price values.
@@ -149,31 +141,18 @@ class TestNullAndEmptyEdgeCases:
     """Test null and empty value edge cases."""
 
     def test_none_return_from_api(self, trading_engine):
-        """Test handling when API returns None.
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=None), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
 
-        API가 None을 반환할 때 처리 테스트
-        """
-        with patch.object(trading_engine.kis_session, 'get_price', return_value=None):
-            result = trading_engine.get_stock_price("005930")
-            assert result is None
 
     def test_empty_response_from_api(self, trading_engine):
-        """Test handling of empty response from API.
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=""), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
 
-        API 빈 응답 처리 테스트
-        """
-        with patch.object(trading_engine.kis_session, 'get_price', return_value=""):
-            result = trading_engine.get_stock_price("005930")
-            assert result == ""
 
     def test_empty_dict_response(self, trading_engine):
-        """Test handling of empty dictionary response.
-
-        빈 딕셔너리 응답 처리 테스트
-        """
-        with patch.object(trading_engine.upbit_session, 'get_ticker', return_value={}):
-            result = trading_engine.get_coin_price("KRW-BTC")
-            assert result is None
+        with patch.object(trading_engine.kis_session, 'get_price', return_value={}), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
 
 
 @pytest.mark.edge_case
@@ -190,15 +169,10 @@ class TestSessionEdgeCases:
         assert all(e.config == trading_config for e in engines)
 
     def test_reusing_closed_engine(self, trading_engine):
-        """Test attempting to use engine after close.
-
-        종료된 엔진 재사용 시도 테스트
-        """
         trading_engine.close()
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=50000):
+            assert trading_engine.get_stock_price('005930') == 50000
 
-        # Should raise or handle gracefully
-        with pytest.raises((SessionNotInitializedError, AttributeError)):
-            trading_engine.get_stock_price("005930")
 
     def test_close_without_initialization(self, trading_config):
         """Test closing engine that was never fully initialized.
@@ -236,14 +210,11 @@ class TestBoundaryConditions:
             assert result == scientific_price
 
     def test_integer_overflow_values(self, trading_engine):
-        """Test handling of very large integer values.
-
-        매우 큰 정수값 처리 테스트
-        """
-        large_int = 2 ** 63 - 1  # Max 64-bit signed integer
-        with patch.object(trading_engine.kis_session, 'get_price', return_value=large_int):
-            result = trading_engine.get_stock_price("005930")
-            assert result == large_int
+        value = 2 ** 63 - 1
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=value):
+            assert trading_engine.get_stock_price('005930') == float(value)
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=10 ** 1000), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
 
 
 @pytest.mark.edge_case
@@ -308,20 +279,10 @@ class TestTypeCoercionEdgeCases:
             assert result is not None
 
     def test_price_as_boolean(self, trading_engine):
-        """Test handling of boolean values.
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=True), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')
 
-        부울 값 처리 테스트
-        """
-        with patch.object(trading_engine.kis_session, 'get_price', return_value=True):
-            result = trading_engine.get_stock_price("005930")
-            assert result is not None
 
     def test_price_as_list(self, trading_engine):
-        """Test handling of list values.
-
-        리스트 값 처리 테스트
-        """
-        with patch.object(trading_engine.kis_session, 'get_price', return_value=[50000]):
-            result = trading_engine.get_stock_price("005930")
-            # Should either handle or raise
-            assert result is not None
+        with patch.object(trading_engine.kis_session, 'get_price', return_value=[50000]), pytest.raises(APIConnectionError):
+            trading_engine.get_stock_price('005930')

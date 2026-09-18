@@ -5,6 +5,8 @@ This module provides common fixtures, mock data, and configuration for all tests
 
 import sys
 import pytest
+import os
+import socket
 from unittest.mock import Mock, MagicMock, patch
 
 # Mock external optional dependencies that may not be installed
@@ -15,6 +17,24 @@ sys.modules['kis'] = mock_kis
 from hybrid_trader.config import TradingConfig, KISConfig, UpbitConfig
 from hybrid_trader.engine import HybridTradingEngine
 from hybrid_trader.analysis import TechnicalAnalyzer
+
+os.environ['BOT_OFFLINE_SMOKE'] = '1'
+os.environ['ENABLE_REAL_TRADING'] = 'false'
+os.environ['DRY_RUN'] = 'true'
+
+
+@pytest.fixture(autouse=True)
+def block_external_network(monkeypatch):
+    import requests
+    original = socket.socket.connect
+    def connect(sock, address):
+        if isinstance(address, tuple) and address[0] in ('127.0.0.1', '::1'):
+            return original(sock, address)
+        raise AssertionError('External network forbidden in tests')
+    def blocked(*args, **kwargs):
+        raise AssertionError('External network forbidden in tests')
+    monkeypatch.setattr(socket.socket, 'connect', connect)
+    monkeypatch.setattr(requests.sessions.Session, 'request', blocked)
 
 
 # ============================================================================

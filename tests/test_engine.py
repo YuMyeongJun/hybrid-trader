@@ -8,7 +8,7 @@ from hybrid_trader.exceptions import ConfigurationError, InvalidTickerError, API
 
 
 @pytest.fixture
-def sample_config():
+def sample_config(tmp_path):
     """Fixture providing sample trading configuration."""
     kis = KISConfig(
         app_key="test_app_key",
@@ -20,7 +20,7 @@ def sample_config():
         access_key="test_access_key",
         secret_key="test_secret_key"
     )
-    return TradingConfig(kis_config=kis, upbit_config=upbit)
+    return TradingConfig(kis_config=kis, upbit_config=upbit, order_db_path=str(tmp_path / 'orders.sqlite3'))
 
 
 class TestHybridTradingEngineInitialization:
@@ -448,40 +448,25 @@ class TestHybridTradingEngineOrderHistory:
     """Test cases for get_order_history method."""
 
     def test_get_order_history_stock(self, sample_config):
-        """Test getting order history for stocks."""
         engine = HybridTradingEngine(sample_config)
+        rows = [{"order_id": "1", "ticker": "005930", "status": "PARTIALLY_FILLED"},
+                {"order_id": "2", "ticker": "KRW-BTC", "status": "OPEN"}]
+        with patch.object(engine.execution, 'orders', return_value=rows):
+            assert engine.get_order_history("005930") == rows[:1]
 
-        with patch.object(engine, '_call_kis_api') as mock_kis:
-            mock_kis.return_value = [
-                {"order_id": "1", "ticker": "005930", "qty": 10, "price": 75000, "status": "completed"}
-            ]
-
-            history = engine.get_order_history("005930", limit=10)
-
-            assert len(history) == 1
-            assert history[0]["order_id"] == "1"
-            mock_kis.assert_called_once()
 
     def test_get_order_history_crypto(self, sample_config):
-        """Test getting order history for cryptocurrencies."""
         engine = HybridTradingEngine(sample_config)
+        rows = [{"order_id": "1", "ticker": "KRW-BTC"}, {"order_id": "2", "ticker": "KRW-BTC"}]
+        with patch.object(engine.execution, 'orders', return_value=rows):
+            assert engine.get_order_history("KRW-BTC", limit=1) == rows[-1:]
 
-        with patch.object(engine, '_call_upbit_api') as mock_upbit:
-            mock_upbit.return_value = [
-                {"order_id": "c1", "market": "KRW-BTC", "qty": 0.5, "price": 65500000, "status": "completed"}
-            ]
-
-            history = engine.get_order_history("KRW-BTC", limit=10)
-
-            assert len(history) == 1
-            assert history[0]["order_id"] == "c1"
-            mock_upbit.assert_called_once()
 
     def test_get_order_history_invalid_ticker(self, sample_config):
         """Test get_order_history raises error with invalid ticker."""
         engine = HybridTradingEngine(sample_config)
 
-        with pytest.raises(ValueError, match="Ticker must be a non-empty string"):
+        with pytest.raises(ValueError, match="Invalid ticker"):
             engine.get_order_history("", limit=10)
 
     def test_get_order_history_invalid_limit(self, sample_config):
@@ -506,77 +491,57 @@ class TestHybridTradingEngineOrderHistory:
             assert history == []
 
     def test_get_order_history_api_failure(self, sample_config):
-        """Test get_order_history raises exception on API failure."""
         engine = HybridTradingEngine(sample_config)
-
-        with patch.object(engine, '_call_kis_api') as mock_kis:
-            mock_kis.side_effect = Exception("API Error")
-
-            with pytest.raises(Exception):
-                engine.get_order_history("005930", limit=10)
+        with patch.object(engine.execution, 'orders', side_effect=OSError('journal unavailable')):
+            with pytest.raises(OSError):
+                engine.get_order_history("005930")
 
 
 class TestHybridTradingEngineCancelOrder:
     """Test cases for cancel_order method."""
 
     def test_cancel_order_success(self, sample_config):
-        """Test successful order cancellation."""
         engine = HybridTradingEngine(sample_config)
+        with patch.object(engine.execution, 'cancel', return_value={"status": "CANCEL_REQUESTED"}) as cancel:
+            assert engine.cancel_order("order_12345")["status"] == "CANCEL_REQUESTED"
+            cancel.assert_called_once_with("order_12345")
 
-        with patch.object(engine, '_call_kis_api') as mock_kis:
-            mock_kis.return_value = {"status": "cancelled"}
 
-            result = engine.cancel_order("order_12345")
-
-            assert result is True
-            mock_kis.assert_called_once()
-
-    def test_cancel_order_fallback_to_upbit(self, sample_config):
-        """Test cancel_order falls back to Upbit API when KIS fails."""
+    def test_cancel_order_fallback_to_upbit(self, sample_config, monkeypatch):
+        from hybrid_trader.brokers import BrokerError
+        sample_config.enable_real_trading = True
+        sample_config.dry_run = False
+        sample_config.order_db_path = ":memory:"
+        monkeypatch.setenv("ENABLE_REAL_TRADING", "true")
+        monkeypatch.setenv("DRY_RUN", "false")
         engine = HybridTradingEngine(sample_config)
+        with patch.object(engine.kis_session, 'cancel') as kis, patch.object(engine.upbit_session, 'cancel') as upbit:
+            with pytest.raises(BrokerError, match="identity"):
+                engine.cancel_order("unowned")
+            kis.assert_not_called()
+            upbit.assert_not_called()
 
-        with patch.object(engine, '_call_kis_api') as mock_kis, \
-             patch.object(engine, '_call_upbit_api') as mock_upbit:
-
-            mock_kis.side_effect = Exception("KIS Error")
-            mock_upbit.return_value = {"status": "cancelled"}
-
-            result = engine.cancel_order("order_12345")
-
-            assert result is True
-            mock_kis.assert_called_once()
-            mock_upbit.assert_called_once()
 
     def test_cancel_order_invalid_order_id(self, sample_config):
         """Test cancel_order raises error with invalid order ID."""
         engine = HybridTradingEngine(sample_config)
 
-        with pytest.raises(ValueError, match="Order ID must be a non-empty string"):
+        with pytest.raises(ValueError, match="Order ID is required"):
             engine.cancel_order("")
 
-        with pytest.raises(ValueError, match="Order ID must be a non-empty string"):
+        with pytest.raises(ValueError, match="Order ID is required"):
             engine.cancel_order(None)
 
     def test_cancel_order_both_apis_fail(self, sample_config):
-        """Test cancel_order raises exception when both APIs fail."""
         engine = HybridTradingEngine(sample_config)
+        with patch.object(engine.execution, 'cancel', side_effect=RuntimeError('journal failure')):
+            with pytest.raises(RuntimeError):
+                engine.cancel_order("known")
 
-        with patch.object(engine, '_call_kis_api') as mock_kis, \
-             patch.object(engine, '_call_upbit_api') as mock_upbit:
-
-            mock_kis.side_effect = Exception("KIS Error")
-            mock_upbit.side_effect = Exception("Upbit Error")
-
-            with pytest.raises(Exception):
-                engine.cancel_order("order_12345")
 
     def test_cancel_order_no_result(self, sample_config):
-        """Test cancel_order returns False when no result is returned."""
         engine = HybridTradingEngine(sample_config)
-
-        with patch.object(engine, '_call_kis_api') as mock_kis:
-            mock_kis.return_value = None
-
-            result = engine.cancel_order("order_12345")
-
-            assert result is False
+        with patch.object(engine.kis_session, 'cancel') as kis, patch.object(engine.upbit_session, 'cancel') as upbit:
+            assert engine.cancel_order("known")["status"] == "DRY_RUN"
+            kis.assert_not_called()
+            upbit.assert_not_called()

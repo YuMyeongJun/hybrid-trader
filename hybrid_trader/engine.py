@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, List
 import logging
 import time
 import math
+import re
 
 from .config import TradingConfig
 from .exceptions import (
@@ -97,87 +98,20 @@ class HybridTradingEngine:
         self._upbit_session = None
         self._alpaca_session = None
         self._ib_session = None
+        from .execution import Execution
+        self.execution = Execution(config)
 
         logger.info("HybridTradingEngine initialized successfully")
 
     @property
     def kis_session(self) -> Any:
-        """Lazy-load Korea Investment & Securities session.
-
-        한국투자증권 세션을 필요할 때만 생성합니다(Lazy Loading).
-
-        Returns:
-            KIS session object
-
-        Raises:
-            SessionNotInitializedError: If KIS session initialization fails.
-            APIConnectionError: If API connection fails.
-        """
-        if self._kis_session is None:
-            try:
-                import kis
-
-                self._kis_session = kis.KISClient(
-                    app_key=self.config.kis_config.app_key,
-                    secret_key=self.config.kis_config.secret_key,
-                    demo=self.config.kis_config.is_demo
-                )
-                logger.info("KIS session initialized successfully")
-            except ImportError as e:
-                logger.error("python-kis library is not installed. Run: pip install python-kis")
-                raise SessionNotInitializedError(
-                    session_name="KIS",
-                    required_config="python-kis library",
-                    message="python-kis library is not installed. Install with: pip install python-kis"
-                ) from e
-            except Exception as e:
-                logger.error(f"Failed to initialize KIS session: {e}")
-                raise APIConnectionError(
-                    api_name="KIS",
-                    original_error=e,
-                    message=f"Failed to connect to KIS API during session initialization"
-                ) from e
-
-        return self._kis_session
+        """Guarded native REST adapter; no project-local kis module dependency."""
+        return self.execution.brokers["kis"]
 
     @property
     def upbit_session(self) -> Any:
-        """Lazy-load Upbit session.
-
-        업비트 세션을 필요할 때만 생성합니다(Lazy Loading).
-
-        Returns:
-            Upbit session object
-
-        Raises:
-            SessionNotInitializedError: If Upbit session initialization fails.
-            APIConnectionError: If API connection fails.
-        """
-        if self._upbit_session is None:
-            try:
-                import pyupbit
-
-                self._upbit_session = pyupbit.Upbit(
-                    access=self.config.upbit_config.access_key,
-                    secret=self.config.upbit_config.secret_key
-                )
-                logger.info("Upbit session initialized successfully")
-            except ImportError as e:
-                logger.error("pyupbit library is not installed. Run: pip install pyupbit")
-                raise SessionNotInitializedError(
-                    session_name="Upbit",
-                    required_config="pyupbit library",
-                    message="pyupbit library is not installed. Install with: pip install pyupbit"
-                ) from e
-            except Exception as e:
-                logger.error(f"Failed to initialize Upbit session: {e}")
-                raise APIConnectionError(
-                    api_name="Upbit",
-                    original_error=e,
-                    message=f"Failed to connect to Upbit API during session initialization"
-                ) from e
-
-        return self._upbit_session
+        """Guarded REST adapter; never expose an unguarded pyupbit order client."""
+        return self.execution.brokers["upbit"]
 
     @property
     def alpaca_session(self) -> Any:
@@ -304,7 +238,7 @@ class HybridTradingEngine:
             >>> price = engine.get_stock_price("005930")
             >>> print(f"Samsung Electronics: {price:,.0f} KRW")
         """
-        if not ticker or not isinstance(ticker, str):
+        if not isinstance(ticker, str) or not re.fullmatch(r'[0-9]{6}', ticker):
             raise InvalidTickerError(
                 ticker=ticker,
                 market="stock",
@@ -358,7 +292,7 @@ class HybridTradingEngine:
             >>> price = engine.get_coin_price("KRW-BTC")
             >>> print(f"Bitcoin: {price:,.0f} KRW")
         """
-        if not ticker or not isinstance(ticker, str):
+        if not isinstance(ticker, str) or not re.fullmatch(r'KRW-[A-Z0-9]+', ticker):
             raise InvalidTickerError(
                 ticker=ticker,
                 market="crypto",
@@ -448,23 +382,32 @@ class HybridTradingEngine:
 
     def _call_kis_api(self, endpoint: str, params=None, method: str = 'GET') -> Any:
         params = params or {}
+        if endpoint in ('/stock/buy', '/stock/sell') and method == 'POST':
+            return self.execution.submit('kis', params['ticker'],
+                'buy' if endpoint.endswith('/buy') else 'sell', params['qty'], params['price'])
+        if endpoint == '/accounts/balance' and method == 'GET':
+            return self.execution.balance('kis')
         if method != 'GET' or endpoint != '/stock/price' or 'ticker' not in params:
             raise UnsupportedOperationError('KIS', endpoint)
         try:
-            result = self.kis_session.fetch_price(params['ticker'])
-            return self._validated_price(result['stck_prpr'])
+            return self._validated_price(self.kis_session.get_price(params['ticker']))
         except Exception as exc:
-            raise APIConnectionError(api_name='KIS', original_error=exc) from exc
+            raise APIConnectionError(api_name='KIS') from None
 
     def _call_upbit_api(self, endpoint: str, params=None, method: str = 'GET') -> Any:
         params = params or {}
+        if endpoint == '/orders' and method == 'POST':
+            return self.execution.submit('upbit', params['market'],
+                'buy' if params['side'] == 'bid' else 'sell',
+                quantity=params.get('volume'), budget=params.get('price'))
+        if endpoint == '/accounts' and method == 'GET':
+            return self.execution.balance('upbit')
         if method != 'GET' or endpoint != '/ticker' or 'markets' not in params:
             raise UnsupportedOperationError('Upbit', endpoint)
         try:
-            import pyupbit
-            return self._validated_price(pyupbit.get_current_price(params['markets']))
+            return self._validated_price(self.upbit_session.get_ticker(params['markets'])['trade_price'])
         except Exception as exc:
-            raise APIConnectionError(api_name='Upbit', original_error=exc) from exc
+            raise APIConnectionError(api_name='Upbit') from None
 
     def _call_alpaca_api(self, endpoint: str, params=None, method: str = 'GET') -> Any:
         params = params or {}
@@ -891,7 +834,29 @@ class HybridTradingEngine:
             logger.error(f"Failed to get total balance: {e}")
             raise
 
+    def get_quote(self, ticker: str) -> Dict[str, Any]:
+        return self.execution.brokers['upbit' if ticker.startswith('KRW-') else 'kis'].quote(ticker)
+
+    def submit_order(self, ticker, side, quantity=None, price=None, budget=None):
+        return self.execution.submit('upbit' if ticker.startswith('KRW-') else 'kis',
+                                     ticker, side, quantity, price, budget)
+
+    def reconcile_orders(self):
+        return self.execution.reconcile()
+
     def get_order_history(self, ticker: str, limit: int = 10) -> List[Dict[str, Any]]:
+        if not isinstance(ticker, str) or not re.fullmatch(r'(?:[0-9]{6}|KRW-[A-Z0-9]+)', ticker):
+            raise ValueError('Invalid ticker')
+        if type(limit) is not int or limit <= 0:
+            raise ValueError('Limit must be a positive integer')
+        return [r for r in self.execution.orders() if r['ticker'] == ticker][-limit:]
+
+    def cancel_order(self, order_id: str):
+        if not isinstance(order_id, str) or not order_id.strip():
+            raise ValueError('Order ID is required')
+        return self.execution.cancel(order_id)
+
+    def _legacy_get_order_history(self, ticker: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Get order history for a specific stock or crypto.
 
         특정 종목의 주문 히스토리를 조회합니다.
@@ -948,7 +913,7 @@ class HybridTradingEngine:
             logger.error(f"Failed to get order history for {ticker}: {e}")
             raise
 
-    def cancel_order(self, order_id: str) -> bool:
+    def _legacy_cancel_order(self, order_id: str) -> bool:
         """Cancel a pending order.
 
         미체결 주문을 취소합니다.
@@ -1179,6 +1144,7 @@ class HybridTradingEngine:
             ... finally:
             ...     engine.close()
         """
+        self.execution.close()
         if self._kis_session is not None:
             try:
                 if hasattr(self._kis_session, 'close'):

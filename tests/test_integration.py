@@ -1,3 +1,4 @@
+from hybrid_trader.exceptions import APIConnectionError
 """Integration tests for Hybrid Trader.
 
 This module tests end-to-end scenarios and interactions between multiple modules.
@@ -115,19 +116,11 @@ class TestAPIErrorHandling:
     """Integration tests for API error handling."""
 
     def test_api_connection_error_recovery(self, trading_engine):
-        """Test recovery from API connection errors."""
-        call_count = [0]
+        with patch.object(trading_engine, '_call_kis_api', side_effect=[Exception('failed'), 75500.0]):
+            with pytest.raises(APIConnectionError):
+                trading_engine.get_stock_price('005930')
+            assert trading_engine.get_stock_price('005930') == 75500.0
 
-        def mock_call_side_effect(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] < 3:
-                raise Exception("Connection failed")
-            return 75500.0
-
-        with patch.object(trading_engine, '_call_kis_api', side_effect=mock_call_side_effect):
-            # Should return None due to exception handling
-            price = trading_engine.get_stock_price("005930")
-            assert price is None
 
     def test_invalid_ticker_error(self, trading_engine):
         """Test error handling for invalid tickers."""
@@ -201,6 +194,8 @@ class TestTechnicalAnalysisIntegration:
 
     def test_full_technical_analysis_workflow(self, mock_price_history):
         """Test complete technical analysis workflow."""
+        # MACD(12,26,9) needs at least 34 observations for its signal line.
+        mock_price_history = mock_price_history + [mock_price_history[-1] + i * 10 for i in range(10)]
         analyzer = TechnicalAnalyzer()
 
         # Validate data

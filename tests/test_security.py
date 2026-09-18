@@ -63,44 +63,18 @@ class TestCredentialSecurity:
             assert engine1._kis_session is not engine2._kis_session
 
     def test_empty_credentials_validation(self):
-        """Test validation of empty credentials.
-
-        빈 자격증명 검증 테스트
-        """
         with pytest.raises(ConfigurationError):
-            KISConfig(
-                app_key="",
-                secret_key="",
-                account_number="",
-                hts_id=""
-            )
+            HybridTradingEngine(TradingConfig(KISConfig('', '', '', ''), UpbitConfig('test', 'test')))
+
 
     def test_none_credentials_validation(self):
-        """Test validation of None credentials.
+        with pytest.raises(ConfigurationError):
+            HybridTradingEngine(TradingConfig(KISConfig(None, None, None, None), UpbitConfig('test', 'test')))
 
-        None 자격증명 검증 테스트
-        """
-        with pytest.raises((ConfigurationError, TypeError)):
-            KISConfig(
-                app_key=None,
-                secret_key=None,
-                account_number=None,
-                hts_id=None
-            )
 
     def test_credentials_type_validation(self):
-        """Test type validation of credentials.
-
-        자격증명 타입 검증 테스트
-        """
-        # Numeric credentials should be rejected or converted properly
-        with pytest.raises((ConfigurationError, TypeError)):
-            KISConfig(
-                app_key=12345,
-                secret_key=67890,
-                account_number=12345,
-                hts_id=98765
-            )
+        with pytest.raises(ConfigurationError):
+            HybridTradingEngine(TradingConfig(KISConfig(12345, 67890, 12345, 98765), UpbitConfig('test', 'test')))
 
 
 @pytest.mark.security

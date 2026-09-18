@@ -64,7 +64,7 @@ class UnsupportedOperationError(HybridTraderException):
         )
 
 
-class InvalidTickerError(HybridTraderException):
+class InvalidTickerError(HybridTraderException, ValueError):
     """Exception raised when an invalid ticker is provided.
 
     잘못된 티커 형식이 제공되었을 때 발생합니다.
@@ -241,7 +241,7 @@ class OrderFailedError(HybridTraderException):
         super().__init__(message, error_code="ORDER_FAILED")
 
 
-class ConfigurationError(HybridTraderException):
+class ConfigurationError(HybridTraderException, ValueError):
     """Exception raised when configuration is invalid or incomplete.
 
     설정이 잘못되었거나 불완전할 때 발생합니다.

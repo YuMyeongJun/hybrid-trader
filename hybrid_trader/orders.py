@@ -19,6 +19,8 @@ def submission_receipt(response: Any) -> OrderReceipt:
     """Never infer execution from a missing response or generic success flag."""
     if not isinstance(response, dict):
         return OrderReceipt(None, "UNKNOWN")
+    if response.get("status") in {"DRY_RUN", "NOT_SENT"}:
+        return OrderReceipt(None, response["status"])
     order_id = response.get("order_id") or response.get("uuid") or response.get("id")
     if not isinstance(order_id, str) or not order_id.strip():
         order_id = None

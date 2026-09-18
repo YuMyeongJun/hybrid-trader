@@ -1,5 +1,6 @@
 # API Keys and Secrets
 .env
+.env.*
 .env.local
 .env.*.local
 
@@ -52,6 +53,9 @@ htmlcov/
 # Logs
 *.log
 logs/
+data/
+*.sqlite3
+*.sqlite3-*
 
 # IDE specific
 .vscode/settings.json

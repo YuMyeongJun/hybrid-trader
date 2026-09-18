@@ -18,20 +18,11 @@ class TestKISAPIIntegration:
     """Test integration with Korea Investment & Securities API."""
 
     def test_kis_session_lazy_initialization(self, trading_engine):
-        """Test that KIS session is lazily initialized.
+        from hybrid_trader.brokers import KISBroker
+        assert isinstance(trading_engine.kis_session, KISBroker)
+        assert trading_engine.kis_session._token is None
+        assert trading_engine.kis_session is trading_engine.kis_session
 
-        KIS 세션 지연 초기화 테스트
-        """
-        # Session should not be created until needed
-        assert trading_engine._kis_session is None
-
-        # Accessing should trigger initialization
-        with patch('hybrid_trader.engine.KIS') as mock_kis:
-            mock_session = MagicMock()
-            mock_kis.return_value = mock_session
-
-            # Trigger session access
-            _ = trading_engine.kis_session
 
     def test_kis_api_call_with_retry(self, trading_engine):
         """Test KIS API calls with retry logic.
@@ -95,13 +86,9 @@ class TestKISAPIIntegration:
                 trading_engine.get_stock_price("005930")
 
     def test_kis_api_malformed_response(self, trading_engine):
-        """Test handling of malformed KIS API responses.
-
-        KIS API 잘못된 응답 처리 테스트
-        """
         with patch.object(trading_engine.kis_session, 'get_price', return_value=None):
-            result = trading_engine.get_stock_price("005930")
-            assert result is None
+            with pytest.raises(APIConnectionError):
+                trading_engine.get_stock_price("005930")
 
 
 @pytest.mark.integration

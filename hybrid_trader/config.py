@@ -4,7 +4,7 @@ This module manages API credentials and trading configurations for both
 Korea Investment & Securities (KIS) and Upbit platforms.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -21,10 +21,10 @@ class KISConfig:
         hts_id (str): HTS ID for real-time data subscription
         is_demo (bool): Whether to use demo/paper trading mode. Defaults to True.
     """
-    app_key: str
-    secret_key: str
-    account_number: str
-    hts_id: str
+    app_key: str = field(repr=False)
+    secret_key: str = field(repr=False)
+    account_number: str = field(repr=False)
+    hts_id: str = field(repr=False)
     is_demo: bool = True
 
 
@@ -38,8 +38,8 @@ class UpbitConfig:
         access_key (str): Upbit Access Key
         secret_key (str): Upbit Secret Key
     """
-    access_key: str
-    secret_key: str
+    access_key: str = field(repr=False)
+    secret_key: str = field(repr=False)
 
 
 @dataclass
@@ -113,6 +113,21 @@ class TradingConfig:
     ib_config: Optional[InteractiveBrokersConfig] = None
     timeout: int = 10
     retry_count: int = 3
+    enable_real_trading: bool = False
+    dry_run: bool = True
+    # Broker-specific mutation gates.  They deliberately default closed so
+    # enabling the global switch can never implicitly enable another venue.
+    enable_kis_paper_trading: bool = False
+    enable_kis_real_trading: bool = False
+    enable_upbit_trading: bool = False
+    order_db_path: str = "data/orders.sqlite3"
+    max_order_amount: float = 100_000
+    max_symbol_amount: float = 100_000
+    max_positions: int = 4
+    max_positions_per_symbol: int = 1
+    daily_loss_limit: float = 50_000
+    max_slippage: float = 0.005
+    fee_reserve: float = 0.003
 
     def validate(self) -> bool:
         """Validate configuration credentials.
@@ -126,6 +141,30 @@ class TradingConfig:
             ValueError: If required credentials are missing or empty.
         """
         missing_fields = []
+        if not isinstance(self.kis_config, KISConfig) or not isinstance(self.upbit_config, UpbitConfig):
+            raise ValueError("KIS and Upbit configurations are required")
+        if type(self.kis_config.is_demo) is not bool or type(self.dry_run) is not bool or type(self.enable_real_trading) is not bool:
+            raise ValueError("Trading mode flags must be boolean")
+        if any(type(getattr(self, name)) is not bool for name in (
+            "enable_kis_paper_trading", "enable_kis_real_trading", "enable_upbit_trading")):
+            raise ValueError("Broker trading gates must be boolean")
+        for credentials in (self.kis_config, self.upbit_config):
+            for name, value in vars(credentials).items():
+                if name != 'is_demo' and value and not isinstance(value, str):
+                    raise ValueError("Credential fields must be strings")
+        import math
+        for name in ("max_order_amount", "max_symbol_amount", "daily_loss_limit"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
+                raise ValueError("Risk limits must be finite and positive")
+        for name in ("max_positions", "max_positions_per_symbol", "retry_count", "timeout"):
+            value = getattr(self, name)
+            if type(value) is not int or value <= 0:
+                raise ValueError("Count and timeout limits must be positive integers")
+        for name in ("max_slippage", "fee_reserve"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(value) or not 0 <= value < 0.1:
+                raise ValueError("Invalid cost limit")
 
         if not self.kis_config.app_key:
             missing_fields.append("KIS app_key")
